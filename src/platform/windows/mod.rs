@@ -318,12 +318,18 @@ impl<T: Tray> WindowState<T> {
     }
 
     fn render(&mut self) -> crate::Result<()> {
+        if self.native.menu_is_open {
+            self.native.menu_refresh_pending = true;
+            return Ok(());
+        }
+
         let view = {
             let tray = self.shared.lock_tray();
             tray.view()
         };
 
         self.native.menu = RenderedMenu::from_items(&view.menu);
+        self.native.menu_refresh_pending = false;
         self.native.menu_on_primary_click = view.menu_on_primary_click;
         self.native.tooltip = tooltip_text(&view);
         self.native.icon = match view.icon.as_ref() {
@@ -368,8 +374,24 @@ impl<T: Tray> WindowState<T> {
         };
 
         // Reference: muda/src/platform_impl/windows/mod.rs::show_context_menu.
+        self.native.menu_is_open = true;
         let command = menu::show_popup_menu(self.native.hwnd, menu.handle());
-        if let Some(id) = command.and_then(|command| menu.resolve(command)) {
+        self.native.menu_is_open = false;
+
+        let selected_id = command.and_then(|command| {
+            self.native
+                .menu
+                .as_ref()
+                .and_then(|menu| menu.resolve(command))
+        });
+
+        if self.native.menu_refresh_pending {
+            if let Err(error) = self.render() {
+                eprintln!("trayinit: deferred menu refresh failed: {error}");
+            }
+        }
+
+        if let Some(id) = selected_id {
             self.dispatch_event(TrayEvent::Menu(id));
             true
         } else {
@@ -496,6 +518,8 @@ struct NativeState<Id> {
     internal_id: u32,
     icon: Option<OwnedIcon>,
     menu: Option<RenderedMenu<Id>>,
+    menu_is_open: bool,
+    menu_refresh_pending: bool,
     tooltip: Option<String>,
     visible: bool,
     registered: bool,
@@ -513,6 +537,8 @@ impl<Id> NativeState<Id> {
             internal_id: NEXT_INTERNAL_ID.fetch_add(1, Ordering::Relaxed),
             icon: None,
             menu: None,
+            menu_is_open: false,
+            menu_refresh_pending: false,
             tooltip: None,
             visible: true,
             registered: false,
