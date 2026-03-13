@@ -1,8 +1,6 @@
 use core::hash::Hash;
-#[cfg(not(windows))]
-use core::marker::PhantomData;
 
-use crate::{ClosedError, Error, Icon, MenuItem, Result, Tooltip, backend};
+use crate::{ClosedError, Error, Icon, MenuItem, Result, Tooltip, platform};
 
 /// User-defined tray state.
 pub trait Tray: Sized + Send + 'static {
@@ -178,15 +176,15 @@ impl<T: Tray> Builder<T> {
     }
 
     pub fn attach(self) -> Result<Handle<T>> {
-        backend::attach(self)
+        platform::attach(self)
     }
 
     pub fn spawn(self) -> Result<Handle<T>> {
-        backend::spawn(self)
+        platform::spawn(self)
     }
 
     pub fn run(self) -> Result<()> {
-        backend::run(self)
+        platform::run(self)
     }
 }
 
@@ -219,32 +217,20 @@ impl Default for LinuxOptions {
 }
 
 /// Control channel to a running tray.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Handle<T: Tray> {
     tray_id: String,
-    #[cfg(windows)]
-    inner: crate::backend::PlatformHandle<T>,
-    #[cfg(not(windows))]
-    _marker: PhantomData<fn() -> T>,
+    inner: crate::platform::PlatformHandle<T>,
 }
 
 impl<T: Tray> Handle<T> {
-    #[cfg(windows)]
     pub(crate) fn new(
         tray_id: impl Into<String>,
-        inner: crate::backend::PlatformHandle<T>,
+        inner: crate::platform::PlatformHandle<T>,
     ) -> Self {
         Self {
             tray_id: tray_id.into(),
             inner,
-        }
-    }
-
-    #[cfg(not(windows))]
-    pub(crate) fn new(tray_id: impl Into<String>) -> Self {
-        Self {
-            tray_id: tray_id.into(),
-            _marker: PhantomData,
         }
     }
 
@@ -253,64 +239,19 @@ impl<T: Tray> Handle<T> {
     }
 
     pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> core::result::Result<R, ClosedError> {
-        #[cfg(windows)]
-        {
-            self.inner.update(f)
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = f;
-            todo!("tray backend is not implemented for this platform yet")
-        }
+        self.inner.update(f)
     }
 
     pub fn refresh(&self) -> core::result::Result<(), ClosedError> {
-        #[cfg(windows)]
-        {
-            self.inner.refresh()
-        }
-        #[cfg(not(windows))]
-        {
-            todo!("tray backend is not implemented for this platform yet")
-        }
+        self.inner.refresh()
     }
 
     pub fn shutdown(&self) -> Result<()> {
-        #[cfg(windows)]
-        {
-            self.inner.shutdown()
-        }
-        #[cfg(not(windows))]
-        {
-            todo!("tray backend is not implemented for this platform yet")
-        }
+        self.inner.shutdown()
     }
 
     pub fn is_closed(&self) -> bool {
-        #[cfg(windows)]
-        {
-            self.inner.is_closed()
-        }
-        #[cfg(not(windows))]
-        {
-            todo!("tray backend is not implemented for this platform yet")
-        }
-    }
-}
-
-impl<T: Tray> Clone for Handle<T> {
-    fn clone(&self) -> Self {
-        #[cfg(windows)]
-        {
-            Self {
-                tray_id: self.tray_id.clone(),
-                inner: self.inner.clone(),
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            Self::new(self.tray_id.clone())
-        }
+        self.inner.is_closed()
     }
 }
 

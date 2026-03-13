@@ -9,7 +9,7 @@ once_cell = "1.21"
 [dev-dependencies]
 winit = "0.30"
 
-[target.'cfg(windows)'.dependencies.windows-sys]
+[target."cfg(target_os = \"windows\")".dependencies.windows-sys]
 version = "0.60"
 features = [
   "Win32_UI_WindowsAndMessaging",

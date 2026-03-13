@@ -57,11 +57,11 @@
 //! handle.update(|tray| tray.checked = true).unwrap();
 //! ```
 
-mod backend;
 mod error;
 mod geometry;
 mod icon;
 mod menu;
+mod platform;
 mod tooltip;
 mod tray;
 
