@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use trayinit::{
-    ActionItem, CheckItem, Icon, MenuItem, RadioGroup, RadioItem, Tray, TrayEvent, TrayMethods,
+    CheckItem, Icon, MenuItem, RadioGroup, RadioItem, StandardItem, Tray, TrayEvent, TrayMethods,
     TrayView,
 };
 
@@ -83,7 +83,7 @@ impl Tray for ShowcaseTray {
                     self.menu_on_primary_click,
                 )
                 .into(),
-                ActionItem::new(MenuId::ResetTicks, "Reset tick counter").into(),
+                StandardItem::new(MenuId::ResetTicks, "Reset tick counter").into(),
                 MenuItem::Separator,
                 RadioGroup {
                     selected: Some(self.accent.selected_id()),
@@ -99,9 +99,9 @@ impl Tray for ShowcaseTray {
                 MenuItem::Submenu(trayinit::Submenu::new(
                     "Session",
                     vec![
-                        ActionItem::new(MenuId::ResetTicks, "Reset tick counter").into(),
+                        StandardItem::new(MenuId::ResetTicks, "Reset tick counter").into(),
                         MenuItem::Separator,
-                        ActionItem::new(MenuId::Quit, "Quit").into(),
+                        StandardItem::new(MenuId::Quit, "Quit").into(),
                     ],
                 )),
             ],

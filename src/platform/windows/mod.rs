@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
 use std::{io, ptr, thread};
 
+use dpi::{PhysicalPosition, PhysicalSize};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM};
 use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
@@ -25,8 +26,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use self::icon::OwnedIcon;
 use self::menu::RenderedMenu;
 use crate::{
-    ActivateEvent, Builder, ClosedError, Error, Handle, PhysicalPosition, PhysicalSize, Rect,
-    RuntimePreference, Tray, TrayEvent, TrayView,
+    ActivateEvent, Builder, ClosedError, Error, Handle, RuntimePreference, Tray, TrayEvent,
+    TrayView,
 };
 
 const WM_USER_TRAYICON: u32 = 6002;
@@ -544,17 +545,17 @@ fn taskbar_created_message() -> u32 {
     *TASKBAR_CREATED.get_or_init(|| unsafe { RegisterWindowMessageA(b"TaskbarCreated\0".as_ptr()) })
 }
 
-fn cursor_position() -> Option<PhysicalPosition> {
+fn cursor_position() -> Option<PhysicalPosition<i32>> {
     let mut point = POINT { x: 0, y: 0 };
     (unsafe { GetCursorPos(&mut point) } == TRUE).then_some(PhysicalPosition::new(point.x, point.y))
 }
 
-fn rect_from_raw(rect: RECT) -> Rect {
-    Rect::new(
+fn rect_from_raw(rect: RECT) -> (PhysicalPosition<i32>, PhysicalSize<i32>) {
+    (
         PhysicalPosition::new(rect.left, rect.top),
         PhysicalSize::new(
-            rect.right.saturating_sub(rect.left) as u32,
-            rect.bottom.saturating_sub(rect.top) as u32,
+            rect.right.saturating_sub(rect.left),
+            rect.bottom.saturating_sub(rect.top),
         ),
     )
 }

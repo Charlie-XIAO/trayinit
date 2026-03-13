@@ -5,7 +5,7 @@ use crate::Icon;
 /// Declarative tray menu tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuItem<Id> {
-    Action(ActionItem<Id>),
+    Standard(StandardItem<Id>),
     Check(CheckItem<Id>),
     RadioGroup(RadioGroup<Id>),
     Submenu(Submenu<Id>),
@@ -15,7 +15,7 @@ pub enum MenuItem<Id> {
 impl<Id> MenuItem<Id> {
     pub fn id(&self) -> Option<&Id> {
         match self {
-            MenuItem::Action(item) => Some(&item.id),
+            MenuItem::Standard(item) => Some(&item.id),
             MenuItem::Check(item) => Some(&item.id),
             MenuItem::RadioGroup(_) => None,
             MenuItem::Submenu(_) => None,
@@ -24,9 +24,9 @@ impl<Id> MenuItem<Id> {
     }
 }
 
-impl<Id> From<ActionItem<Id>> for MenuItem<Id> {
-    fn from(value: ActionItem<Id>) -> Self {
-        Self::Action(value)
+impl<Id> From<StandardItem<Id>> for MenuItem<Id> {
+    fn from(value: StandardItem<Id>) -> Self {
+        Self::Standard(value)
     }
 }
 
@@ -50,7 +50,7 @@ impl<Id> From<Submenu<Id>> for MenuItem<Id> {
 
 /// A normal clickable menu item.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ActionItem<Id> {
+pub struct StandardItem<Id> {
     pub id: Id,
     pub label: String,
     pub enabled: bool,
@@ -59,7 +59,7 @@ pub struct ActionItem<Id> {
     pub accelerator: Option<Accelerator>,
 }
 
-impl<Id> ActionItem<Id> {
+impl<Id> StandardItem<Id> {
     pub fn new(id: Id, label: impl Into<String>) -> Self {
         Self {
             id,

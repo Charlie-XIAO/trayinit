@@ -1,6 +1,8 @@
 use core::hash::Hash;
 
-use crate::{ClosedError, Error, Icon, MenuItem, Result, platform};
+use dpi::{PhysicalPosition, PhysicalSize};
+
+use crate::{ClosedError, Error, Icon, Result, menu::MenuItem, platform};
 
 /// User-defined tray state.
 pub trait Tray: Sized + Send + 'static {
@@ -104,8 +106,8 @@ pub enum TrayEvent<Id> {
 /// Activation metadata for tray clicks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ActivateEvent {
-    pub position: Option<crate::PhysicalPosition>,
-    pub area: Option<crate::Rect>,
+    pub position: Option<PhysicalPosition<i32>>,
+    pub area: Option<(PhysicalPosition<i32>, PhysicalSize<i32>)>,
 }
 
 /// A wheel/gesture scroll event over the tray icon.

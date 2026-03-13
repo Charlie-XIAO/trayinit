@@ -13,7 +13,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use super::dark_menu_bar;
 use super::icon::OwnedBitmap;
 use super::util::encode_wide;
-use crate::{Accelerator, MenuItem};
+use crate::menu::{Accelerator, MenuItem};
 
 const MENU_SUBCLASS_ID: usize = 200;
 
@@ -92,21 +92,21 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
                 }
                 self.added_items += 1;
             },
-            MenuItem::Action(action) if action.visible => {
+            MenuItem::Standard(standard) if standard.visible => {
                 let command = self.next_command();
                 let text = encode_wide(label_with_accelerator(
-                    &action.label,
-                    action.accelerator.as_ref(),
+                    &standard.label,
+                    standard.accelerator.as_ref(),
                 ));
                 let mut flags = MF_STRING;
-                if !action.enabled {
+                if !standard.enabled {
                     flags |= MF_DISABLED | MF_GRAYED;
                 }
                 unsafe {
                     AppendMenuW(parent, flags, command as usize, text.as_ptr());
                 }
-                self.command_map.insert(command, action.id.clone());
-                self.add_icon(parent, command, action.icon.as_ref());
+                self.command_map.insert(command, standard.id.clone());
+                self.add_icon(parent, command, standard.icon.as_ref());
                 self.added_items += 1;
             },
             MenuItem::Check(check) if check.visible => {

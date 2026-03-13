@@ -58,17 +58,17 @@
 //! ```
 
 mod error;
-mod geometry;
 mod icon;
 mod menu;
 mod platform;
 mod tray;
 
+pub use dpi;
+
 pub use error::{ClosedError, Error, IconError, Result};
-pub use geometry::{PhysicalPosition, PhysicalSize, Rect};
 pub use icon::Icon;
 pub use menu::{
-    Accelerator, ActionItem, CheckItem, Key, MenuItem, Modifiers, RadioGroup, RadioItem, Submenu,
+    Accelerator, CheckItem, Key, MenuItem, Modifiers, RadioGroup, RadioItem, StandardItem, Submenu,
 };
 pub use tray::{
     ActivateEvent, Builder, Handle, LinuxOptions, RuntimePreference, ScrollAxis, ScrollEvent, Tray,

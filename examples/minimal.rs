@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use trayinit::{ActionItem, CheckItem, Handle, MenuItem, Tray, TrayEvent, TrayMethods, TrayView};
+use trayinit::{CheckItem, Handle, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods, TrayView};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MenuId {
@@ -31,7 +31,7 @@ impl Tray for MinimalTray {
             menu: vec![
                 CheckItem::new(MenuId::Toggle, "Enabled", self.enabled).into(),
                 MenuItem::Separator,
-                ActionItem::new(MenuId::Quit, "Quit").into(),
+                StandardItem::new(MenuId::Quit, "Quit").into(),
             ],
             ..Default::default()
         }
