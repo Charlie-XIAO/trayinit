@@ -1,4 +1,3 @@
-#[cfg(windows)]
 use std::{
     sync::{
         Arc,
@@ -7,11 +6,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(windows)]
 use trayinit::{
     ActionItem, CheckItem, Handle, MenuItem, Tooltip, Tray, TrayEvent, TrayMethods, TrayView,
 };
-#[cfg(windows)]
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -19,21 +16,18 @@ use winit::{
     window::WindowId,
 };
 
-#[cfg(windows)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MenuId {
     ToggleTicks,
     Quit,
 }
 
-#[cfg(windows)]
 struct WinitTray {
     ticking: bool,
     ticks: u32,
     keep_running: Arc<AtomicBool>,
 }
 
-#[cfg(windows)]
 impl Tray for WinitTray {
     type MenuId = MenuId;
 
@@ -70,14 +64,12 @@ impl Tray for WinitTray {
     }
 }
 
-#[cfg(windows)]
 struct App {
     tray: Option<Handle<WinitTray>>,
     keep_running: Arc<AtomicBool>,
     next_tick: Instant,
 }
 
-#[cfg(windows)]
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.tray.is_none() {
@@ -127,7 +119,6 @@ impl ApplicationHandler for App {
     }
 }
 
-#[cfg(windows)]
 fn main() {
     println!("Running winit no-window tray example.");
     println!("No window is created. winit only owns the application loop.");
@@ -143,12 +134,6 @@ fn main() {
     event_loop.run_app(&mut app).expect("run winit app");
 }
 
-#[cfg(windows)]
 fn on_off(value: bool) -> &'static str {
     if value { "on" } else { "off" }
-}
-
-#[cfg(not(windows))]
-fn main() {
-    eprintln!("This example currently requires Windows.");
 }

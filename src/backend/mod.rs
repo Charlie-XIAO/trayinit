@@ -1,12 +1,13 @@
 #[cfg(windows)]
-mod windows;
+#[path = "windows/mod.rs"]
+mod platform;
 
 #[cfg(windows)]
-pub(crate) use windows::PlatformHandle;
+pub(crate) use platform::PlatformHandle;
 
 #[cfg(windows)]
 pub(crate) fn spawn<T: crate::Tray>(builder: crate::Builder<T>) -> crate::Result<crate::Handle<T>> {
-    windows::spawn(builder)
+    platform::spawn(builder)
 }
 
 #[cfg(not(windows))]

@@ -1,4 +1,3 @@
-#[cfg(windows)]
 use std::{
     sync::{
         Arc,
@@ -8,13 +7,11 @@ use std::{
     time::Duration,
 };
 
-#[cfg(windows)]
 use trayinit::{
     ActionItem, CheckItem, Icon, MenuItem, RadioGroup, RadioItem, Tooltip, Tray, TrayEvent,
     TrayMethods, TrayView,
 };
 
-#[cfg(windows)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MenuId {
     ToggleTicks,
@@ -26,7 +23,6 @@ enum MenuId {
     Quit,
 }
 
-#[cfg(windows)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Accent {
     Red,
@@ -34,7 +30,6 @@ enum Accent {
     Blue,
 }
 
-#[cfg(windows)]
 impl Accent {
     fn rgb(self) -> (u8, u8, u8) {
         match self {
@@ -53,7 +48,6 @@ impl Accent {
     }
 }
 
-#[cfg(windows)]
 struct ShowcaseTray {
     ticks_enabled: bool,
     menu_on_primary_click: bool,
@@ -62,7 +56,6 @@ struct ShowcaseTray {
     keep_running: Arc<AtomicBool>,
 }
 
-#[cfg(windows)]
 impl Tray for ShowcaseTray {
     type MenuId = MenuId;
 
@@ -151,7 +144,6 @@ impl Tray for ShowcaseTray {
     }
 }
 
-#[cfg(windows)]
 fn main() {
     let keep_running = Arc::new(AtomicBool::new(true));
     let handle = ShowcaseTray {
@@ -192,12 +184,10 @@ fn main() {
     handle.shutdown().expect("shutdown showcase tray example");
 }
 
-#[cfg(windows)]
 fn on_off(value: bool) -> &'static str {
     if value { "on" } else { "off" }
 }
 
-#[cfg(windows)]
 fn make_icon(accent: Accent, active: bool) -> Icon {
     let (r, g, b) = accent.rgb();
     let width = 32usize;
@@ -226,9 +216,4 @@ fn make_icon(accent: Accent, active: bool) -> Icon {
     }
 
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated icon")
-}
-
-#[cfg(not(windows))]
-fn main() {
-    eprintln!("This example currently requires Windows.");
 }

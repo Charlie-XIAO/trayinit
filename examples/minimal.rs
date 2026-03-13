@@ -1,4 +1,3 @@
-#[cfg(windows)]
 use std::{
     sync::{
         Arc,
@@ -8,25 +7,21 @@ use std::{
     time::Duration,
 };
 
-#[cfg(windows)]
 use trayinit::{
     ActionItem, CheckItem, Handle, MenuItem, Tooltip, Tray, TrayEvent, TrayMethods, TrayView,
 };
 
-#[cfg(windows)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MenuId {
     Toggle,
     Quit,
 }
 
-#[cfg(windows)]
 struct MinimalTray {
     enabled: bool,
     keep_running: Arc<AtomicBool>,
 }
 
-#[cfg(windows)]
 impl Tray for MinimalTray {
     type MenuId = MenuId;
 
@@ -64,7 +59,6 @@ impl Tray for MinimalTray {
     }
 }
 
-#[cfg(windows)]
 fn main() {
     let keep_running = Arc::new(AtomicBool::new(true));
     let handle: Handle<MinimalTray> = MinimalTray {
@@ -82,9 +76,4 @@ fn main() {
     }
 
     handle.shutdown().expect("shutdown minimal tray example");
-}
-
-#[cfg(not(windows))]
-fn main() {
-    eprintln!("This example currently requires Windows.");
 }
