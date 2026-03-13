@@ -60,6 +60,7 @@
 mod error;
 mod icon;
 mod menu;
+pub(crate) mod model;
 mod platform;
 mod tray;
 

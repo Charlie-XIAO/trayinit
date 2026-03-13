@@ -25,9 +25,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use self::icon::OwnedIcon;
 use self::menu::RenderedMenu;
+use crate::model::{MenuDiff, NormalizedTrayView};
 use crate::{
     ActivateEvent, Builder, ClosedError, Error, Handle, RuntimePreference, Tray, TrayEvent,
-    TrayView,
 };
 
 const WM_USER_TRAYICON: u32 = 6002;
@@ -328,21 +328,52 @@ impl<T: Tray> WindowState<T> {
             tray.view()
         };
 
-        self.native.menu = RenderedMenu::from_items(&view.menu);
+        let view = NormalizedTrayView::from_view(view);
+        let diff = self.native.view.as_ref().map(|old| old.diff(&view));
+
         self.native.menu_refresh_pending = false;
         self.native.menu_on_primary_click = view.menu_on_primary_click;
         self.native.tooltip = tooltip_text(&view);
-        self.native.icon = match view.icon.as_ref() {
-            Some(icon) => Some(OwnedIcon::from_icon(icon)?),
-            None => None,
-        };
+
+        let icon_changed = diff.as_ref().map_or(true, |diff| diff.icon_changed);
+        if icon_changed {
+            self.native.icon = match view.icon.as_ref() {
+                Some(icon) => Some(OwnedIcon::from_icon(icon)?),
+                None => None,
+            };
+        }
+
+        match diff.as_ref().map(|diff| &diff.menu) {
+            None | Some(MenuDiff::Rebuild) => {
+                self.native.menu = RenderedMenu::from_model(&view.menu);
+            },
+            Some(MenuDiff::None) => {},
+            Some(MenuDiff::Patch(patches)) => {
+                let mut applied = false;
+                if let Some(menu) = self.native.menu.as_mut() {
+                    applied = menu.apply_patches(patches);
+                }
+
+                if !applied {
+                    self.native.menu = RenderedMenu::from_model(&view.menu);
+                }
+            },
+        }
+
+        let visible_changed = diff.as_ref().map_or(true, |diff| diff.visible_changed);
+        let tooltip_changed = diff
+            .as_ref()
+            .map_or(true, |diff| diff.tooltip_changed || diff.title_changed);
         self.native.visible = view.visible;
+        self.native.view = Some(view);
 
         // Reference: tray-icon/src/platform_impl/windows/mod.rs::{register_tray_icon,
         // remove_tray_icon}. We use the same Shell_NotifyIconW lifecycle, but feed it
         // from the reactive TrayView snapshot instead of retained icon/menu handles.
         if self.native.visible {
-            self.native.sync_tray_icon();
+            if !self.native.registered || icon_changed || tooltip_changed || visible_changed {
+                self.native.sync_tray_icon();
+            }
         } else {
             self.native.remove_tray_icon();
         }
@@ -516,6 +547,7 @@ impl<T: Tray> Shared<T> {
 struct NativeState<Id> {
     hwnd: HWND,
     internal_id: u32,
+    view: Option<NormalizedTrayView<Id>>,
     icon: Option<OwnedIcon>,
     menu: Option<RenderedMenu<Id>>,
     menu_is_open: bool,
@@ -535,6 +567,7 @@ impl<Id> NativeState<Id> {
         Self {
             hwnd: ptr::null_mut(),
             internal_id: NEXT_INTERNAL_ID.fetch_add(1, Ordering::Relaxed),
+            view: None,
             icon: None,
             menu: None,
             menu_is_open: false,
@@ -586,7 +619,7 @@ fn rect_from_raw(rect: RECT) -> (PhysicalPosition<i32>, PhysicalSize<i32>) {
     )
 }
 
-fn tooltip_text<Id>(view: &TrayView<Id>) -> Option<String> {
+fn tooltip_text<Id>(view: &NormalizedTrayView<Id>) -> Option<String> {
     if let Some(tooltip) = &view.tooltip {
         Some(tooltip.clone())
     } else {

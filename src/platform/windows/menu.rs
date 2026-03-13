@@ -1,31 +1,42 @@
 use std::collections::HashMap;
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{FALSE, HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED, MF_DISABLED,
-    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MIIM_BITMAP, SetForegroundWindow,
-    SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TrackPopupMenu, WM_NCACTIVATE,
-    WM_NCPAINT,
+use windows_sys::Win32::{
+    Foundation::{HWND, LPARAM, LRESULT, POINT, TRUE, WPARAM},
+    UI::{
+        Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
+        WindowsAndMessaging::{
+            AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED,
+            MF_DISABLED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MFS_CHECKED,
+            MFS_DISABLED, MFS_ENABLED, MFS_UNCHECKED, MIIM_BITMAP, MIIM_STATE, MIIM_STRING,
+            SetForegroundWindow, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+            TrackPopupMenu, WM_NCACTIVATE, WM_NCPAINT,
+        },
+    },
+};
+
+use crate::{
+    menu::Accelerator,
+    model::{
+        CommandState, MenuPatch, NormalizedCommandItem, NormalizedMenuItem, NormalizedSubmenu,
+    },
 };
 
 use super::dark_menu_bar;
 use super::icon::OwnedBitmap;
 use super::util::encode_wide;
-use crate::menu::{Accelerator, MenuItem};
 
 const MENU_SUBCLASS_ID: usize = 200;
 
 #[derive(Debug)]
 pub(crate) struct RenderedMenu<Id> {
     root: HMENU,
+    items: Vec<NativeMenuItem>,
     command_map: HashMap<u32, Id>,
-    _bitmaps: Vec<OwnedBitmap>,
 }
 
 impl<Id: Clone + Eq> RenderedMenu<Id> {
-    pub(crate) fn from_items(items: &[MenuItem<Id>]) -> Option<Self> {
+    pub(crate) fn from_model(items: &[NormalizedMenuItem<Id>]) -> Option<Self> {
         let root = unsafe { CreatePopupMenu() };
         if root.is_null() {
             return None;
@@ -33,13 +44,11 @@ impl<Id: Clone + Eq> RenderedMenu<Id> {
 
         let mut builder = MenuBuilder {
             next_command: 1,
-            added_items: 0,
             command_map: HashMap::new(),
-            bitmaps: Vec::new(),
         };
-        builder.append_items(root, items);
+        let items = builder.append_items(root, items);
 
-        if builder.added_items == 0 {
+        if items.is_empty() {
             unsafe {
                 DestroyMenu(root);
             }
@@ -47,8 +56,8 @@ impl<Id: Clone + Eq> RenderedMenu<Id> {
         } else {
             Some(Self {
                 root,
+                items,
                 command_map: builder.command_map,
-                _bitmaps: builder.bitmaps,
             })
         }
     }
@@ -60,6 +69,112 @@ impl<Id: Clone + Eq> RenderedMenu<Id> {
     pub(crate) fn resolve(&self, command: u32) -> Option<Id> {
         self.command_map.get(&command).cloned()
     }
+
+    pub(crate) fn apply_patches(&mut self, patches: &[MenuPatch<Id>]) -> bool {
+        for patch in patches {
+            let ok = match patch {
+                MenuPatch::Command { path, item } => {
+                    self.apply_command_patch(path.as_slice(), item)
+                },
+                MenuPatch::Submenu { path, item } => {
+                    self.apply_submenu_patch(path.as_slice(), item)
+                },
+            };
+
+            if !ok {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn apply_command_patch(&mut self, path: &[usize], item: &NormalizedCommandItem<Id>) -> bool {
+        let Some((parent, position, node)) = Self::locate_mut(self.root, &mut self.items, path)
+        else {
+            return false;
+        };
+
+        let command = match node.kind {
+            NativeMenuItemKind::Command { command } => command,
+            _ => return false,
+        };
+
+        let text = encode_wide(label_with_accelerator(
+            &item.label,
+            item.accelerator.as_ref(),
+        ));
+        let bitmap = bitmap_from_icon(item.icon.as_ref());
+        let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as _;
+        info.fMask = MIIM_STRING | MIIM_STATE | MIIM_BITMAP;
+        info.fState = command_state(item.state, item.enabled);
+        info.dwTypeData = text.as_ptr() as *mut _;
+        info.cch = text.len().saturating_sub(1) as _;
+        info.hbmpItem = bitmap_handle(bitmap.as_ref());
+
+        let ok = unsafe { SetMenuItemInfoW(parent, position as u32, TRUE, &info) != 0 };
+        if !ok {
+            return false;
+        }
+
+        node.bitmap = bitmap;
+        self.command_map.insert(command, item.id.clone());
+        true
+    }
+
+    fn apply_submenu_patch(&mut self, path: &[usize], item: &NormalizedSubmenu<Id>) -> bool {
+        let Some((parent, position, node)) = Self::locate_mut(self.root, &mut self.items, path)
+        else {
+            return false;
+        };
+
+        let NativeMenuItemKind::Submenu { .. } = node.kind else {
+            return false;
+        };
+
+        let text = encode_wide(item.label.as_str());
+        let bitmap = bitmap_from_icon(item.icon.as_ref());
+        let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as _;
+        info.fMask = MIIM_STRING | MIIM_STATE | MIIM_BITMAP;
+        info.fState = if item.enabled {
+            MFS_ENABLED
+        } else {
+            MFS_DISABLED
+        };
+        info.dwTypeData = text.as_ptr() as *mut _;
+        info.cch = text.len().saturating_sub(1) as _;
+        info.hbmpItem = bitmap_handle(bitmap.as_ref());
+
+        let ok = unsafe { SetMenuItemInfoW(parent, position as u32, TRUE, &info) != 0 };
+        if !ok {
+            return false;
+        }
+
+        node.bitmap = bitmap;
+        true
+    }
+
+    fn locate_mut<'a>(
+        parent: HMENU,
+        items: &'a mut [NativeMenuItem],
+        path: &[usize],
+    ) -> Option<(HMENU, usize, &'a mut NativeMenuItem)> {
+        let (index, rest) = path.split_first()?;
+        let node = items.get_mut(*index)?;
+
+        if rest.is_empty() {
+            return Some((parent, *index, node));
+        }
+
+        match &mut node.kind {
+            NativeMenuItemKind::Submenu { menu, children } => {
+                Self::locate_mut(*menu, children, rest)
+            },
+            _ => None,
+        }
+    }
 }
 
 impl<Id> Drop for RenderedMenu<Id> {
@@ -70,130 +185,138 @@ impl<Id> Drop for RenderedMenu<Id> {
     }
 }
 
+#[derive(Debug)]
+struct NativeMenuItem {
+    bitmap: Option<OwnedBitmap>,
+    kind: NativeMenuItemKind,
+}
+
+#[derive(Debug)]
+enum NativeMenuItemKind {
+    Separator,
+    Command {
+        command: u32,
+    },
+    Submenu {
+        #[allow(dead_code)]
+        menu: HMENU,
+        children: Vec<NativeMenuItem>,
+    },
+}
+
 struct MenuBuilder<Id> {
     next_command: u32,
-    added_items: usize,
     command_map: HashMap<u32, Id>,
-    bitmaps: Vec<OwnedBitmap>,
 }
 
 impl<Id: Clone + Eq> MenuBuilder<Id> {
-    fn append_items(&mut self, parent: HMENU, items: &[MenuItem<Id>]) {
+    fn append_items(
+        &mut self,
+        parent: HMENU,
+        items: &[NormalizedMenuItem<Id>],
+    ) -> Vec<NativeMenuItem> {
+        let mut rendered = Vec::with_capacity(items.len());
+
         for item in items {
-            self.append_item(parent, item);
+            if let Some(rendered_item) = self.append_item(parent, rendered.len() as u32, item) {
+                rendered.push(rendered_item);
+            }
         }
+
+        rendered
     }
 
-    fn append_item(&mut self, parent: HMENU, item: &MenuItem<Id>) {
+    fn append_item(
+        &mut self,
+        parent: HMENU,
+        position: u32,
+        item: &NormalizedMenuItem<Id>,
+    ) -> Option<NativeMenuItem> {
         match item {
-            MenuItem::Separator => {
+            NormalizedMenuItem::Separator => {
                 unsafe {
                     AppendMenuW(parent, MF_SEPARATOR, 0, ptr::null());
                 }
-                self.added_items += 1;
+                Some(NativeMenuItem {
+                    bitmap: None,
+                    kind: NativeMenuItemKind::Separator,
+                })
             },
-            MenuItem::Standard(standard) if standard.visible => {
-                let command = self.next_command();
-                let text = encode_wide(label_with_accelerator(
-                    &standard.label,
-                    standard.accelerator.as_ref(),
-                ));
-                let mut flags = MF_STRING;
-                if !standard.enabled {
-                    flags |= MF_DISABLED | MF_GRAYED;
-                }
-                unsafe {
-                    AppendMenuW(parent, flags, command as usize, text.as_ptr());
-                }
-                self.command_map.insert(command, standard.id.clone());
-                self.add_icon(parent, command, standard.icon.as_ref());
-                self.added_items += 1;
-            },
-            MenuItem::Check(check) if check.visible => {
-                let command = self.next_command();
-                let text = encode_wide(label_with_accelerator(
-                    &check.label,
-                    check.accelerator.as_ref(),
-                ));
-                let mut flags = MF_STRING;
-                if check.checked {
-                    flags |= MF_CHECKED;
-                } else {
-                    flags |= MF_UNCHECKED;
-                }
-                if !check.enabled {
-                    flags |= MF_DISABLED | MF_GRAYED;
-                }
-                unsafe {
-                    AppendMenuW(parent, flags, command as usize, text.as_ptr());
-                }
-                self.command_map.insert(command, check.id.clone());
-                self.add_icon(parent, command, check.icon.as_ref());
-                self.added_items += 1;
-            },
-            MenuItem::RadioGroup(group) if group.visible => {
-                for option in group.options.iter().filter(|option| option.visible) {
-                    let command = self.next_command();
-                    let text = encode_wide(label_with_accelerator(
-                        &option.label,
-                        option.accelerator.as_ref(),
-                    ));
-                    let mut flags = MF_STRING;
-                    if group.selected.as_ref() == Some(&option.id) {
-                        flags |= MF_CHECKED;
-                    } else {
-                        flags |= MF_UNCHECKED;
-                    }
-                    if !group.enabled || !option.enabled {
-                        flags |= MF_DISABLED | MF_GRAYED;
-                    }
-                    unsafe {
-                        AppendMenuW(parent, flags, command as usize, text.as_ptr());
-                    }
-                    self.command_map.insert(command, option.id.clone());
-                    self.add_icon(parent, command, option.icon.as_ref());
-                    self.added_items += 1;
-                }
-            },
-            MenuItem::Submenu(submenu) if submenu.visible => {
-                let popup = unsafe { CreatePopupMenu() };
-                if popup.is_null() {
-                    return;
-                }
-                self.append_items(popup, &submenu.children);
-                let text = encode_wide(submenu.label.as_str());
-                let mut flags = MF_POPUP;
-                if !submenu.enabled {
-                    flags |= MF_DISABLED | MF_GRAYED;
-                }
-                unsafe {
-                    AppendMenuW(parent, flags, popup as usize, text.as_ptr());
-                }
-                self.added_items += 1;
-            },
-            _ => {},
+            NormalizedMenuItem::Standard(item)
+            | NormalizedMenuItem::Check(item)
+            | NormalizedMenuItem::Radio(item) => self.append_command(parent, position, item),
+            NormalizedMenuItem::Submenu(submenu) => self.append_submenu(parent, position, submenu),
         }
+    }
+
+    fn append_command(
+        &mut self,
+        parent: HMENU,
+        position: u32,
+        item: &NormalizedCommandItem<Id>,
+    ) -> Option<NativeMenuItem> {
+        let command = self.next_command();
+        let text = encode_wide(label_with_accelerator(
+            &item.label,
+            item.accelerator.as_ref(),
+        ));
+        unsafe {
+            AppendMenuW(
+                parent,
+                command_flags(item.state, item.enabled),
+                command as usize,
+                text.as_ptr(),
+            );
+        }
+
+        let bitmap = bitmap_from_icon(item.icon.as_ref());
+        set_menu_bitmap_by_position(parent, position, bitmap.as_ref());
+        self.command_map.insert(command, item.id.clone());
+
+        Some(NativeMenuItem {
+            bitmap,
+            kind: NativeMenuItemKind::Command { command },
+        })
+    }
+
+    fn append_submenu(
+        &mut self,
+        parent: HMENU,
+        position: u32,
+        submenu: &NormalizedSubmenu<Id>,
+    ) -> Option<NativeMenuItem> {
+        let popup = unsafe { CreatePopupMenu() };
+        if popup.is_null() {
+            return None;
+        }
+
+        let children = self.append_items(popup, &submenu.children);
+        let text = encode_wide(submenu.label.as_str());
+        let mut flags = MF_POPUP;
+        if !submenu.enabled {
+            flags |= MF_DISABLED | MF_GRAYED;
+        }
+
+        unsafe {
+            AppendMenuW(parent, flags, popup as usize, text.as_ptr());
+        }
+
+        let bitmap = bitmap_from_icon(submenu.icon.as_ref());
+        set_menu_bitmap_by_position(parent, position, bitmap.as_ref());
+
+        Some(NativeMenuItem {
+            bitmap,
+            kind: NativeMenuItemKind::Submenu {
+                menu: popup,
+                children,
+            },
+        })
     }
 
     fn next_command(&mut self) -> u32 {
         let command = self.next_command;
         self.next_command = self.next_command.saturating_add(1);
         command
-    }
-
-    fn add_icon(&mut self, parent: HMENU, command: u32, icon: Option<&crate::Icon>) {
-        let Some(icon) = icon else {
-            return;
-        };
-        let Ok(bitmap) = OwnedBitmap::from_icon(icon) else {
-            return;
-        };
-
-        let info = menu_bitmap_info(bitmap.handle());
-        unsafe {
-            SetMenuItemInfoW(parent, command, FALSE, &info);
-        }
-        self.bitmaps.push(bitmap);
     }
 }
 
@@ -204,12 +327,61 @@ fn label_with_accelerator(label: &str, accelerator: Option<&Accelerator>) -> Str
     }
 }
 
-fn menu_bitmap_info(bitmap: windows_sys::Win32::Graphics::Gdi::HBITMAP) -> MENUITEMINFOW {
+fn command_flags(state: CommandState, enabled: bool) -> u32 {
+    let mut flags = MF_STRING;
+    match state {
+        CommandState::Standard => {},
+        CommandState::Check { checked } | CommandState::Radio { selected: checked } => {
+            if checked {
+                flags |= MF_CHECKED;
+            } else {
+                flags |= MF_UNCHECKED;
+            }
+        },
+    }
+
+    if !enabled {
+        flags |= MF_DISABLED | MF_GRAYED;
+    }
+
+    flags
+}
+
+fn command_state(state: CommandState, enabled: bool) -> u32 {
+    let mut flags = if enabled { MFS_ENABLED } else { MFS_DISABLED };
+
+    match state {
+        CommandState::Standard => {},
+        CommandState::Check { checked } | CommandState::Radio { selected: checked } => {
+            if checked {
+                flags |= MFS_CHECKED;
+            } else {
+                flags |= MFS_UNCHECKED;
+            }
+        },
+    }
+
+    flags
+}
+
+fn bitmap_from_icon(icon: Option<&crate::Icon>) -> Option<OwnedBitmap> {
+    let icon = icon?;
+    OwnedBitmap::from_icon(icon).ok()
+}
+
+fn bitmap_handle(bitmap: Option<&OwnedBitmap>) -> windows_sys::Win32::Graphics::Gdi::HBITMAP {
+    bitmap.map_or(ptr::null_mut(), OwnedBitmap::handle)
+}
+
+fn set_menu_bitmap_by_position(parent: HMENU, position: u32, bitmap: Option<&OwnedBitmap>) {
     let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as _;
     info.fMask = MIIM_BITMAP;
-    info.hbmpItem = bitmap;
-    info
+    info.hbmpItem = bitmap_handle(bitmap);
+
+    unsafe {
+        SetMenuItemInfoW(parent, position, TRUE, &info);
+    }
 }
 
 pub(crate) fn show_popup_menu(hwnd: HWND, menu: HMENU) -> Option<u32> {
