@@ -561,12 +561,7 @@ fn rect_from_raw(rect: RECT) -> Rect {
 
 fn tooltip_text<Id>(view: &TrayView<Id>) -> Option<String> {
     if let Some(tooltip) = &view.tooltip {
-        match (tooltip.title.trim(), tooltip.body.trim()) {
-            ("", "") => None,
-            (title, "") => Some(title.to_string()),
-            ("", body) => Some(body.to_string()),
-            (title, body) => Some(format!("{title}: {body}")),
-        }
+        Some(tooltip.clone())
     } else {
         view.title.clone()
     }

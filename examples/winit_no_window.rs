@@ -2,9 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use trayinit::{
-    ActionItem, CheckItem, Handle, MenuItem, Tooltip, Tray, TrayEvent, TrayMethods, TrayView,
-};
+use trayinit::{ActionItem, CheckItem, Handle, MenuItem, Tray, TrayEvent, TrayMethods, TrayView};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -32,9 +30,10 @@ impl Tray for WinitTray {
     fn view(&self) -> TrayView<Self::MenuId> {
         TrayView {
             title: Some(format!("winit host loop, ticks={}", self.ticks)),
-            tooltip: Some(Tooltip::new(
-                "trayinit + winit",
-                format!("timer={}, ticks={}", on_off(self.ticking), self.ticks),
+            tooltip: Some(format!(
+                "trayinit + winit: timer={}, ticks={}",
+                on_off(self.ticking),
+                self.ticks
             )),
             menu: vec![
                 CheckItem::new(MenuId::ToggleTicks, "Tick once per second", self.ticking).into(),

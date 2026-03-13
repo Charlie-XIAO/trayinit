@@ -62,7 +62,6 @@ mod geometry;
 mod icon;
 mod menu;
 mod platform;
-mod tooltip;
 mod tray;
 
 pub use error::{ClosedError, Error, IconError, Result};
@@ -71,7 +70,6 @@ pub use icon::Icon;
 pub use menu::{
     Accelerator, ActionItem, CheckItem, Key, MenuItem, Modifiers, RadioGroup, RadioItem, Submenu,
 };
-pub use tooltip::Tooltip;
 pub use tray::{
     ActivateEvent, Builder, Handle, LinuxOptions, RuntimePreference, ScrollAxis, ScrollEvent, Tray,
     TrayEvent, TrayMethods, TrayStatus, TrayView,

@@ -1,6 +1,6 @@
 use core::hash::Hash;
 
-use crate::{ClosedError, Error, Icon, MenuItem, Result, Tooltip, platform};
+use crate::{ClosedError, Error, Icon, MenuItem, Result, platform};
 
 /// User-defined tray state.
 pub trait Tray: Sized + Send + 'static {
@@ -62,7 +62,7 @@ mod private {
 pub struct TrayView<Id> {
     pub icon: Option<Icon>,
     pub title: Option<String>,
-    pub tooltip: Option<Tooltip>,
+    pub tooltip: Option<String>,
     pub visible: bool,
     pub status: TrayStatus,
     pub menu_on_primary_click: bool,

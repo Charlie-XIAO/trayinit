@@ -4,8 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use trayinit::{
-    ActionItem, CheckItem, Icon, MenuItem, RadioGroup, RadioItem, Tooltip, Tray, TrayEvent,
-    TrayMethods, TrayView,
+    ActionItem, CheckItem, Icon, MenuItem, RadioGroup, RadioItem, Tray, TrayEvent, TrayMethods,
+    TrayView,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -63,14 +63,11 @@ impl Tray for ShowcaseTray {
         TrayView {
             icon: Some(make_icon(self.accent, self.ticks_enabled)),
             title: Some(format!("Showcase ticks: {}", self.tick_count)),
-            tooltip: Some(Tooltip::new(
-                "trayinit showcase",
-                format!(
-                    "ticks={}, timer={}, left-click menu={}",
-                    self.tick_count,
-                    on_off(self.ticks_enabled),
-                    on_off(self.menu_on_primary_click),
-                ),
+            tooltip: Some(format!(
+                "trayinit showcase: ticks={}, timer={}, left-click menu={}",
+                self.tick_count,
+                on_off(self.ticks_enabled),
+                on_off(self.menu_on_primary_click),
             )),
             menu_on_primary_click: self.menu_on_primary_click,
             menu: vec![

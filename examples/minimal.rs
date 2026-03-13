@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use trayinit::{
-    ActionItem, CheckItem, Handle, MenuItem, Tooltip, Tray, TrayEvent, TrayMethods, TrayView,
-};
+use trayinit::{ActionItem, CheckItem, Handle, MenuItem, Tray, TrayEvent, TrayMethods, TrayView};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MenuId {
@@ -29,10 +27,7 @@ impl Tray for MinimalTray {
         let status = if self.enabled { "enabled" } else { "disabled" };
         TrayView {
             title: Some(format!("Minimal example: {status}")),
-            tooltip: Some(Tooltip::new(
-                "trayinit minimal",
-                "Toggle the checkbox or quit from the tray menu.",
-            )),
+            tooltip: Some("trayinit minimal".into()),
             menu: vec![
                 CheckItem::new(MenuId::Toggle, "Enabled", self.enabled).into(),
                 MenuItem::Separator,
