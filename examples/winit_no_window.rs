@@ -2,14 +2,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use trayinit::{CheckItem, Handle, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods, TrayView};
+use trayinit::{CheckItem, Handle, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::WindowId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum MenuId {
+enum Message {
     ToggleTicks,
     Quit,
 }
@@ -21,35 +21,38 @@ struct WinitTray {
 }
 
 impl Tray for WinitTray {
-    type MenuId = MenuId;
+    type Message = Message;
 
     fn id(&self) -> &str {
         "dev.trayinit.examples.winit_no_window"
     }
 
-    fn view(&self) -> TrayView<Self::MenuId> {
-        TrayView {
-            title: Some(format!("winit host loop, ticks={}", self.ticks)),
-            tooltip: Some(format!(
-                "trayinit + winit: timer={}, ticks={}",
-                on_off(self.ticking),
-                self.ticks
-            )),
-            menu: vec![
-                CheckItem::new(MenuId::ToggleTicks, "Tick once per second", self.ticking).into(),
-                MenuItem::Separator,
-                StandardItem::new(MenuId::Quit, "Quit").into(),
-            ],
-            ..Default::default()
-        }
+    fn title(&self) -> Option<String> {
+        Some(format!("winit host loop, ticks={}", self.ticks))
     }
 
-    fn event(&mut self, event: TrayEvent<Self::MenuId>) {
+    fn tooltip(&self) -> Option<String> {
+        Some(format!(
+            "trayinit + winit: timer={}, ticks={}",
+            on_off(self.ticking),
+            self.ticks
+        ))
+    }
+
+    fn menu(&self) -> Vec<MenuItem<Self::Message>> {
+        vec![
+            CheckItem::new("Tick once per second", self.ticking, Message::ToggleTicks).into(),
+            MenuItem::Separator,
+            StandardItem::new("Quit", Message::Quit).into(),
+        ]
+    }
+
+    fn event(&mut self, event: TrayEvent<Self::Message>) {
         match event {
-            TrayEvent::Menu(MenuId::ToggleTicks) => {
+            TrayEvent::Menu(Message::ToggleTicks) => {
                 self.ticking = !self.ticking;
             },
-            TrayEvent::Menu(MenuId::Quit) => {
+            TrayEvent::Menu(Message::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },
             TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
@@ -70,10 +73,9 @@ impl ApplicationHandler for App {
                 ticking: true,
                 ticks: 0,
                 keep_running: Arc::clone(&self.keep_running),
-            }
-            .attach()
-            .expect("attach winit tray example");
-            self.tray = Some(tray);
+            };
+            let handle = tray.attach().expect("attach winit tray example");
+            self.tray = Some(handle);
         }
 
         event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_tick));

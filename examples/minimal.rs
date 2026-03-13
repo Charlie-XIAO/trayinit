@@ -3,10 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use trayinit::{CheckItem, Handle, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods, TrayView};
+use trayinit::{CheckItem, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum MenuId {
+enum Message {
     Toggle,
     Quit,
 }
@@ -17,32 +17,35 @@ struct MinimalTray {
 }
 
 impl Tray for MinimalTray {
-    type MenuId = MenuId;
+    type Message = Message;
 
     fn id(&self) -> &str {
         "dev.trayinit.examples.minimal"
     }
 
-    fn view(&self) -> TrayView<Self::MenuId> {
+    fn title(&self) -> Option<String> {
         let status = if self.enabled { "enabled" } else { "disabled" };
-        TrayView {
-            title: Some(format!("Minimal example: {status}")),
-            tooltip: Some("trayinit minimal".into()),
-            menu: vec![
-                CheckItem::new(MenuId::Toggle, "Enabled", self.enabled).into(),
-                MenuItem::Separator,
-                StandardItem::new(MenuId::Quit, "Quit").into(),
-            ],
-            ..Default::default()
-        }
+        Some(format!("Minimal example: {status}"))
     }
 
-    fn event(&mut self, event: TrayEvent<Self::MenuId>) {
+    fn tooltip(&self) -> Option<String> {
+        Some("trayinit minimal".into())
+    }
+
+    fn menu(&self) -> Vec<MenuItem<Self::Message>> {
+        vec![
+            CheckItem::new("Enabled", self.enabled, Message::Toggle).into(),
+            MenuItem::Separator,
+            StandardItem::new("Quit", Message::Quit).into(),
+        ]
+    }
+
+    fn event(&mut self, event: TrayEvent<Self::Message>) {
         match event {
-            TrayEvent::Menu(MenuId::Toggle) => {
+            TrayEvent::Menu(Message::Toggle) => {
                 self.enabled = !self.enabled;
             },
-            TrayEvent::Menu(MenuId::Quit) => {
+            TrayEvent::Menu(Message::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },
             TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
@@ -52,12 +55,11 @@ impl Tray for MinimalTray {
 
 fn main() {
     let keep_running = Arc::new(AtomicBool::new(true));
-    let handle: Handle<MinimalTray> = MinimalTray {
-        enabled: true,
+    let tray = MinimalTray {
+        enabled: false,
         keep_running: Arc::clone(&keep_running),
-    }
-    .spawn()
-    .expect("spawn minimal tray example");
+    };
+    let handle = tray.spawn().expect("spawn minimal tray example");
 
     println!("Running minimal tray example.");
     println!("Startup mode: spawn() self-hosted tray.");

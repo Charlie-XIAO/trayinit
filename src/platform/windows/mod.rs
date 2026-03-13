@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use self::icon::OwnedIcon;
 use self::menu::RenderedMenu;
-use crate::model::{MenuDiff, NormalizedTrayView};
+use crate::model::{MenuDiff, NormalizedTrayView, diff_menu_items};
 use crate::{
     ActivateEvent, Builder, ClosedError, Error, Handle, RuntimePreference, Tray, TrayEvent,
 };
@@ -306,7 +306,7 @@ struct WindowUserData {
 
 struct WindowState<T: Tray> {
     shared: Arc<Shared<T>>,
-    native: NativeState<T::MenuId>,
+    native: NativeState<T::Message>,
 }
 
 impl<T: Tray> WindowState<T> {
@@ -318,24 +318,26 @@ impl<T: Tray> WindowState<T> {
     }
 
     fn render(&mut self) -> crate::Result<()> {
-        if self.native.menu_is_open {
-            self.native.menu_refresh_pending = true;
-            return Ok(());
-        }
-
         let view = {
             let tray = self.shared.lock_tray();
-            tray.view()
+            NormalizedTrayView::from_tray(&*tray)
         };
 
-        let view = NormalizedTrayView::from_view(view);
-        let diff = self.native.view.as_ref().map(|old| old.diff(&view));
+        let previous_view = self.native.view.as_ref();
+        let icon_changed = previous_view.is_none_or(|old| old.icon != view.icon);
+        let title_changed = previous_view.is_none_or(|old| old.title != view.title);
+        let tooltip_changed = previous_view.is_none_or(|old| old.tooltip != view.tooltip);
+        let visible_changed = previous_view.is_none_or(|old| old.visible != view.visible);
+        let menu_on_primary_click_changed =
+            previous_view.is_none_or(|old| old.menu_on_primary_click != view.menu_on_primary_click);
+        let menu_diff = match self.native.menu_view.as_ref() {
+            Some(menu) => diff_menu_items(menu, &view.menu),
+            None => MenuDiff::Rebuild,
+        };
 
-        self.native.menu_refresh_pending = false;
         self.native.menu_on_primary_click = view.menu_on_primary_click;
         self.native.tooltip = tooltip_text(&view);
 
-        let icon_changed = diff.as_ref().map_or(true, |diff| diff.icon_changed);
         if icon_changed {
             self.native.icon = match view.icon.as_ref() {
                 Some(icon) => Some(OwnedIcon::from_icon(icon)?),
@@ -343,27 +345,31 @@ impl<T: Tray> WindowState<T> {
             };
         }
 
-        match diff.as_ref().map(|diff| &diff.menu) {
-            None | Some(MenuDiff::Rebuild) => {
-                self.native.menu = RenderedMenu::from_model(&view.menu);
-            },
-            Some(MenuDiff::None) => {},
-            Some(MenuDiff::Patch(patches)) => {
-                let mut applied = false;
-                if let Some(menu) = self.native.menu.as_mut() {
-                    applied = menu.apply_patches(patches);
-                }
-
-                if !applied {
+        if self.native.menu_is_open {
+            if !matches!(menu_diff, MenuDiff::None) {
+                self.native.menu_refresh_pending = true;
+            }
+        } else {
+            self.native.menu_refresh_pending = false;
+            match &menu_diff {
+                MenuDiff::Rebuild => {
                     self.native.menu = RenderedMenu::from_model(&view.menu);
-                }
-            },
+                },
+                MenuDiff::None => {},
+                MenuDiff::Patch(patches) => {
+                    let mut applied = false;
+                    if let Some(menu) = self.native.menu.as_mut() {
+                        applied = menu.apply_patches(patches);
+                    }
+
+                    if !applied {
+                        self.native.menu = RenderedMenu::from_model(&view.menu);
+                    }
+                },
+            }
+            self.native.menu_view = Some(view.menu.clone());
         }
 
-        let visible_changed = diff.as_ref().map_or(true, |diff| diff.visible_changed);
-        let tooltip_changed = diff
-            .as_ref()
-            .map_or(true, |diff| diff.tooltip_changed || diff.title_changed);
         self.native.visible = view.visible;
         self.native.view = Some(view);
 
@@ -371,7 +377,13 @@ impl<T: Tray> WindowState<T> {
         // remove_tray_icon}. We use the same Shell_NotifyIconW lifecycle, but feed it
         // from the reactive TrayView snapshot instead of retained icon/menu handles.
         if self.native.visible {
-            if !self.native.registered || icon_changed || tooltip_changed || visible_changed {
+            if !self.native.registered
+                || icon_changed
+                || title_changed
+                || tooltip_changed
+                || visible_changed
+                || menu_on_primary_click_changed
+            {
                 self.native.sync_tray_icon();
             }
         } else {
@@ -381,7 +393,7 @@ impl<T: Tray> WindowState<T> {
         Ok(())
     }
 
-    fn dispatch_event(&mut self, event: TrayEvent<T::MenuId>) {
+    fn dispatch_event(&mut self, event: TrayEvent<T::Message>) {
         {
             let mut tray = self.shared.lock_tray();
             tray.event(event);
@@ -548,6 +560,7 @@ struct NativeState<Id> {
     hwnd: HWND,
     internal_id: u32,
     view: Option<NormalizedTrayView<Id>>,
+    menu_view: Option<Vec<crate::model::NormalizedMenuItem<Id>>>,
     icon: Option<OwnedIcon>,
     menu: Option<RenderedMenu<Id>>,
     menu_is_open: bool,
@@ -568,6 +581,7 @@ impl<Id> NativeState<Id> {
             hwnd: ptr::null_mut(),
             internal_id: NEXT_INTERNAL_ID.fetch_add(1, Ordering::Relaxed),
             view: None,
+            menu_view: None,
             icon: None,
             menu: None,
             menu_is_open: false,

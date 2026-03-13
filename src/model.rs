@@ -1,73 +1,50 @@
 use crate::{
     Icon,
     menu::{Accelerator, MenuItem},
-    tray::{TrayStatus, TrayView},
+    tray::{Tray, TrayStatus},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NormalizedTrayView<Id> {
+pub(crate) struct NormalizedTrayView<Message> {
     pub icon: Option<Icon>,
     pub title: Option<String>,
     pub tooltip: Option<String>,
     pub visible: bool,
     pub status: TrayStatus,
     pub menu_on_primary_click: bool,
-    pub menu: Vec<NormalizedMenuItem<Id>>,
+    pub menu: Vec<NormalizedMenuItem<Message>>,
 }
 
-impl<Id: Clone + Eq> NormalizedTrayView<Id> {
-    pub(crate) fn from_view(view: TrayView<Id>) -> Self {
+impl<Message: Clone + Eq> NormalizedTrayView<Message> {
+    pub(crate) fn from_tray<T: Tray<Message = Message>>(tray: &T) -> Self {
         Self {
-            icon: view.icon,
-            title: view.title,
-            tooltip: view.tooltip,
-            visible: view.visible,
-            status: view.status,
-            menu_on_primary_click: view.menu_on_primary_click,
-            menu: normalize_menu_items(view.menu),
-        }
-    }
-
-    pub(crate) fn diff(&self, new: &Self) -> TrayViewDiff<Id> {
-        TrayViewDiff {
-            icon_changed: self.icon != new.icon,
-            title_changed: self.title != new.title,
-            tooltip_changed: self.tooltip != new.tooltip,
-            visible_changed: self.visible != new.visible,
-            status_changed: self.status != new.status,
-            menu_on_primary_click_changed: self.menu_on_primary_click != new.menu_on_primary_click,
-            menu: diff_menu_items(&self.menu, &new.menu),
+            icon: tray.icon(),
+            title: tray.title(),
+            tooltip: tray.tooltip(),
+            visible: tray.visible(),
+            status: tray.status(),
+            menu_on_primary_click: tray.menu_on_primary_click(),
+            menu: normalize_menu_items(tray.menu()),
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct TrayViewDiff<Id> {
-    pub icon_changed: bool,
-    pub title_changed: bool,
-    pub tooltip_changed: bool,
-    pub visible_changed: bool,
-    pub status_changed: bool,
-    pub menu_on_primary_click_changed: bool,
-    pub menu: MenuDiff<Id>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum MenuDiff<Id> {
+pub(crate) enum MenuDiff<Message> {
     None,
-    Patch(Vec<MenuPatch<Id>>),
+    Patch(Vec<MenuPatch<Message>>),
     Rebuild,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum MenuPatch<Id> {
+pub(crate) enum MenuPatch<Message> {
     Command {
         path: MenuPath,
-        item: NormalizedCommandItem<Id>,
+        item: NormalizedCommandItem<Message>,
     },
     Submenu {
         path: MenuPath,
-        item: NormalizedSubmenu<Id>,
+        item: NormalizedSubmenu<Message>,
     },
 }
 
@@ -85,17 +62,17 @@ impl MenuPath {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum NormalizedMenuItem<Id> {
-    Standard(NormalizedCommandItem<Id>),
-    Check(NormalizedCommandItem<Id>),
-    Radio(NormalizedCommandItem<Id>),
-    Submenu(NormalizedSubmenu<Id>),
+pub(crate) enum NormalizedMenuItem<Message> {
+    Standard(NormalizedCommandItem<Message>),
+    Check(NormalizedCommandItem<Message>),
+    Radio(NormalizedCommandItem<Message>),
+    Submenu(NormalizedSubmenu<Message>),
     Separator,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NormalizedCommandItem<Id> {
-    pub id: Id,
+pub(crate) struct NormalizedCommandItem<Message> {
+    pub message: Message,
     pub label: String,
     pub enabled: bool,
     pub icon: Option<Icon>,
@@ -111,21 +88,23 @@ pub(crate) enum CommandState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NormalizedSubmenu<Id> {
+pub(crate) struct NormalizedSubmenu<Message> {
     pub label: String,
     pub enabled: bool,
     pub icon: Option<Icon>,
-    pub children: Vec<NormalizedMenuItem<Id>>,
+    pub children: Vec<NormalizedMenuItem<Message>>,
 }
 
-fn normalize_menu_items<Id: Clone + Eq>(items: Vec<MenuItem<Id>>) -> Vec<NormalizedMenuItem<Id>> {
+fn normalize_menu_items<Message: Clone + Eq>(
+    items: Vec<MenuItem<Message>>,
+) -> Vec<NormalizedMenuItem<Message>> {
     let mut normalized = Vec::new();
 
     for item in items {
         match item {
             MenuItem::Standard(item) if item.visible => {
                 normalized.push(NormalizedMenuItem::Standard(NormalizedCommandItem {
-                    id: item.id,
+                    message: item.message,
                     label: item.label,
                     enabled: item.enabled,
                     icon: item.icon,
@@ -135,7 +114,7 @@ fn normalize_menu_items<Id: Clone + Eq>(items: Vec<MenuItem<Id>>) -> Vec<Normali
             },
             MenuItem::Check(item) if item.visible => {
                 normalized.push(NormalizedMenuItem::Check(NormalizedCommandItem {
-                    id: item.id,
+                    message: item.message,
                     label: item.label,
                     enabled: item.enabled,
                     icon: item.icon,
@@ -152,13 +131,13 @@ fn normalize_menu_items<Id: Clone + Eq>(items: Vec<MenuItem<Id>>) -> Vec<Normali
                     }
 
                     normalized.push(NormalizedMenuItem::Radio(NormalizedCommandItem {
-                        id: option.id.clone(),
+                        message: option.message.clone(),
                         label: option.label,
                         enabled: group.enabled && option.enabled,
                         icon: option.icon,
                         accelerator: option.accelerator,
                         state: CommandState::Radio {
-                            selected: group.selected.as_ref() == Some(&option.id),
+                            selected: group.selected.as_ref() == Some(&option.message),
                         },
                     }));
                 }
@@ -179,10 +158,10 @@ fn normalize_menu_items<Id: Clone + Eq>(items: Vec<MenuItem<Id>>) -> Vec<Normali
     normalized
 }
 
-fn diff_menu_items<Id: Clone + Eq>(
-    old: &[NormalizedMenuItem<Id>],
-    new: &[NormalizedMenuItem<Id>],
-) -> MenuDiff<Id> {
+pub(crate) fn diff_menu_items<Message: Clone + Eq>(
+    old: &[NormalizedMenuItem<Message>],
+    new: &[NormalizedMenuItem<Message>],
+) -> MenuDiff<Message> {
     if !has_same_shape(old, new) {
         return MenuDiff::Rebuild;
     }
@@ -198,7 +177,10 @@ fn diff_menu_items<Id: Clone + Eq>(
     }
 }
 
-fn has_same_shape<Id>(old: &[NormalizedMenuItem<Id>], new: &[NormalizedMenuItem<Id>]) -> bool {
+fn has_same_shape<Message>(
+    old: &[NormalizedMenuItem<Message>],
+    new: &[NormalizedMenuItem<Message>],
+) -> bool {
     if old.len() != new.len() {
         return false;
     }
@@ -215,11 +197,11 @@ fn has_same_shape<Id>(old: &[NormalizedMenuItem<Id>], new: &[NormalizedMenuItem<
     })
 }
 
-fn collect_menu_patches<Id: Clone + Eq>(
-    old: &[NormalizedMenuItem<Id>],
-    new: &[NormalizedMenuItem<Id>],
+fn collect_menu_patches<Message: Clone + Eq>(
+    old: &[NormalizedMenuItem<Message>],
+    new: &[NormalizedMenuItem<Message>],
     path: &mut Vec<usize>,
-    patches: &mut Vec<MenuPatch<Id>>,
+    patches: &mut Vec<MenuPatch<Message>>,
 ) {
     for (index, (old, new)) in old.iter().zip(new).enumerate() {
         path.push(index);
@@ -254,39 +236,96 @@ fn collect_menu_patches<Id: Clone + Eq>(
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandState, MenuDiff, NormalizedMenuItem, NormalizedTrayView};
+    use super::{CommandState, MenuDiff, NormalizedMenuItem, NormalizedTrayView, diff_menu_items};
     use crate::{
+        Icon, Tray, TrayEvent, TrayStatus,
         menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu},
-        tray::TrayView,
     };
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    enum Id {
+    enum Message {
         A,
         B,
         C,
     }
 
+    struct TestTray {
+        icon: Option<Icon>,
+        title: Option<String>,
+        tooltip: Option<String>,
+        visible: bool,
+        status: TrayStatus,
+        menu_on_primary_click: bool,
+        menu: Vec<MenuItem<Message>>,
+    }
+
+    impl Tray for TestTray {
+        type Message = Message;
+
+        fn id(&self) -> &str {
+            "test"
+        }
+
+        fn icon(&self) -> Option<Icon> {
+            self.icon.clone()
+        }
+
+        fn title(&self) -> Option<String> {
+            self.title.clone()
+        }
+
+        fn tooltip(&self) -> Option<String> {
+            self.tooltip.clone()
+        }
+
+        fn visible(&self) -> bool {
+            self.visible
+        }
+
+        fn status(&self) -> TrayStatus {
+            self.status
+        }
+
+        fn menu_on_primary_click(&self) -> bool {
+            self.menu_on_primary_click
+        }
+
+        fn menu(&self) -> Vec<MenuItem<Self::Message>> {
+            self.menu.clone()
+        }
+
+        fn event(&mut self, _event: TrayEvent<Self::Message>) {}
+    }
+
+    fn test_tray(menu: Vec<MenuItem<Message>>) -> TestTray {
+        TestTray {
+            icon: None,
+            title: None,
+            tooltip: None,
+            visible: true,
+            status: TrayStatus::Active,
+            menu_on_primary_click: false,
+            menu,
+        }
+    }
+
     #[test]
     fn radio_group_normalizes_into_visible_items() {
-        let mut hidden = RadioItem::new(Id::B, "Hidden");
+        let mut hidden = RadioItem::new("Hidden", Message::B);
         hidden.visible = false;
 
-        let view = TrayView {
-            menu: vec![MenuItem::RadioGroup(RadioGroup {
-                selected: Some(Id::C),
-                options: vec![
-                    RadioItem::new(Id::A, "A"),
-                    hidden,
-                    RadioItem::new(Id::C, "C"),
-                ],
-                enabled: true,
-                visible: true,
-            })],
-            ..Default::default()
-        };
+        let tray = test_tray(vec![MenuItem::RadioGroup(RadioGroup {
+            selected: Some(Message::C),
+            options: vec![
+                RadioItem::new("A", Message::A),
+                hidden,
+                RadioItem::new("C", Message::C),
+            ],
+            enabled: true,
+            visible: true,
+        })]);
 
-        let normalized = NormalizedTrayView::from_view(view);
+        let normalized = NormalizedTrayView::from_tray(&tray);
         assert_eq!(normalized.menu.len(), 2);
         assert!(matches!(
             &normalized.menu[0],
@@ -302,29 +341,28 @@ mod tests {
 
     #[test]
     fn menu_property_change_produces_patch() {
-        let old = NormalizedTrayView::from_view(TrayView {
-            menu: vec![CheckItem::new(Id::A, "Enabled", false).into()],
-            ..Default::default()
-        });
-        let new = NormalizedTrayView::from_view(TrayView {
-            menu: vec![CheckItem::new(Id::A, "Enabled", true).into()],
-            ..Default::default()
-        });
+        let old = NormalizedTrayView::from_tray(&test_tray(vec![
+            CheckItem::new("Enabled", false, Message::A).into(),
+        ]));
+        let new = NormalizedTrayView::from_tray(&test_tray(vec![
+            CheckItem::new("Enabled", true, Message::A).into(),
+        ]));
 
-        assert!(matches!(old.diff(&new).menu, MenuDiff::Patch(_)));
+        assert!(matches!(
+            diff_menu_items(&old.menu, &new.menu),
+            MenuDiff::Patch(_)
+        ));
     }
 
     #[test]
     fn menu_shape_change_requests_rebuild() {
-        let old = NormalizedTrayView::from_view(TrayView {
-            menu: vec![StandardItem::new(Id::A, "A").into()],
-            ..Default::default()
-        });
-        let new = NormalizedTrayView::from_view(TrayView {
-            menu: vec![Submenu::new("Group", vec![StandardItem::new(Id::A, "A").into()]).into()],
-            ..Default::default()
-        });
+        let old = NormalizedTrayView::from_tray(&test_tray(vec![
+            StandardItem::new("A", Message::A).into(),
+        ]));
+        let new = NormalizedTrayView::from_tray(&test_tray(vec![
+            Submenu::new("Group", vec![StandardItem::new("A", Message::A).into()]).into(),
+        ]));
 
-        assert_eq!(old.diff(&new).menu, MenuDiff::Rebuild);
+        assert_eq!(diff_menu_items(&old.menu, &new.menu), MenuDiff::Rebuild);
     }
 }

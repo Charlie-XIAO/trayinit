@@ -11,7 +11,7 @@
 //!
 //! ```no_run
 //! use trayinit::{
-//!     ActionItem, CheckItem, Handle, MenuItem, Tray, TrayEvent, TrayMethods, TrayView,
+//!     CheckItem, Handle, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods,
 //! };
 //!
 //! #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -25,24 +25,21 @@
 //! }
 //!
 //! impl Tray for AppTray {
-//!     type MenuId = ItemId;
+//!     type Message = ItemId;
 //!
 //!     fn id(&self) -> &str {
 //!         "com.example.app"
 //!     }
 //!
-//!     fn view(&self) -> TrayView<Self::MenuId> {
-//!         TrayView {
-//!             menu: vec![
-//!                 CheckItem::new(ItemId::Toggle, "Enabled", self.checked).into(),
-//!                 MenuItem::Separator,
-//!                 ActionItem::new(ItemId::Quit, "Quit").into(),
-//!             ],
-//!             ..Default::default()
-//!         }
+//!     fn menu(&self) -> Vec<MenuItem<Self::Message>> {
+//!         vec![
+//!             CheckItem::new("Enabled", self.checked, ItemId::Toggle).into(),
+//!             MenuItem::Separator,
+//!             StandardItem::new("Quit", ItemId::Quit).into(),
+//!         ]
 //!     }
 //!
-//!     fn event(&mut self, event: TrayEvent<Self::MenuId>) {
+//!     fn event(&mut self, event: TrayEvent<Self::Message>) {
 //!         match event {
 //!             TrayEvent::Menu(ItemId::Toggle) => self.checked = !self.checked,
 //!             TrayEvent::Menu(ItemId::Quit) => {}
@@ -73,5 +70,5 @@ pub use menu::{
 };
 pub use tray::{
     ActivateEvent, Builder, Handle, LinuxOptions, RuntimePreference, ScrollAxis, ScrollEvent, Tray,
-    TrayEvent, TrayMethods, TrayStatus, TrayView,
+    TrayEvent, TrayMethods, TrayStatus,
 };

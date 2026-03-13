@@ -5,11 +5,10 @@ use std::time::Duration;
 
 use trayinit::{
     CheckItem, Icon, MenuItem, RadioGroup, RadioItem, StandardItem, Tray, TrayEvent, TrayMethods,
-    TrayView,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum MenuId {
+enum Message {
     ToggleTicks,
     TogglePrimaryClickMenu,
     ResetTicks,
@@ -35,11 +34,11 @@ impl Accent {
         }
     }
 
-    fn selected_id(self) -> MenuId {
+    fn selected_id(self) -> Message {
         match self {
-            Self::Red => MenuId::AccentRed,
-            Self::Green => MenuId::AccentGreen,
-            Self::Blue => MenuId::AccentBlue,
+            Self::Red => Message::AccentRed,
+            Self::Green => Message::AccentGreen,
+            Self::Blue => Message::AccentBlue,
         }
     }
 }
@@ -53,83 +52,92 @@ struct ShowcaseTray {
 }
 
 impl Tray for ShowcaseTray {
-    type MenuId = MenuId;
+    type Message = Message;
 
     fn id(&self) -> &str {
         "dev.trayinit.examples.showcase"
     }
 
-    fn view(&self) -> TrayView<Self::MenuId> {
-        TrayView {
-            icon: Some(make_icon(self.accent, self.ticks_enabled)),
-            title: Some(format!("Showcase ticks: {}", self.tick_count)),
-            tooltip: Some(format!(
-                "trayinit showcase: ticks={}, timer={}, left-click menu={}",
-                self.tick_count,
-                on_off(self.ticks_enabled),
-                on_off(self.menu_on_primary_click),
-            )),
-            menu_on_primary_click: self.menu_on_primary_click,
-            menu: vec![
-                CheckItem::new(
-                    MenuId::ToggleTicks,
-                    "Advance ticks every second",
-                    self.ticks_enabled,
-                )
-                .into(),
-                CheckItem::new(
-                    MenuId::TogglePrimaryClickMenu,
-                    "Open menu on left click",
-                    self.menu_on_primary_click,
-                )
-                .into(),
-                StandardItem::new(MenuId::ResetTicks, "Reset tick counter").into(),
-                MenuItem::Separator,
-                RadioGroup {
-                    selected: Some(self.accent.selected_id()),
-                    options: vec![
-                        RadioItem::new(MenuId::AccentRed, "Accent: Red"),
-                        RadioItem::new(MenuId::AccentGreen, "Accent: Green"),
-                        RadioItem::new(MenuId::AccentBlue, "Accent: Blue"),
-                    ],
-                    enabled: true,
-                    visible: true,
-                }
-                .into(),
-                MenuItem::Submenu(trayinit::Submenu::new(
-                    "Session",
-                    vec![
-                        StandardItem::new(MenuId::ResetTicks, "Reset tick counter").into(),
-                        MenuItem::Separator,
-                        StandardItem::new(MenuId::Quit, "Quit").into(),
-                    ],
-                )),
-            ],
-            ..Default::default()
-        }
+    fn icon(&self) -> Option<Icon> {
+        Some(make_icon(self.accent, self.ticks_enabled))
     }
 
-    fn event(&mut self, event: TrayEvent<Self::MenuId>) {
+    fn title(&self) -> Option<String> {
+        Some(format!("Showcase ticks: {}", self.tick_count))
+    }
+
+    fn tooltip(&self) -> Option<String> {
+        Some(format!(
+            "trayinit showcase: ticks={}, timer={}, left-click menu={}",
+            self.tick_count,
+            on_off(self.ticks_enabled),
+            on_off(self.menu_on_primary_click),
+        ))
+    }
+
+    fn menu_on_primary_click(&self) -> bool {
+        self.menu_on_primary_click
+    }
+
+    fn menu(&self) -> Vec<MenuItem<Self::Message>> {
+        vec![
+            CheckItem::new(
+                "Advance ticks every second",
+                self.ticks_enabled,
+                Message::ToggleTicks,
+            )
+            .into(),
+            CheckItem::new(
+                "Open menu on left click",
+                self.menu_on_primary_click,
+                Message::TogglePrimaryClickMenu,
+            )
+            .into(),
+            StandardItem::new("Reset tick counter", Message::ResetTicks).into(),
+            MenuItem::Separator,
+            RadioGroup {
+                selected: Some(self.accent.selected_id()),
+                options: vec![
+                    RadioItem::new("Accent: Red", Message::AccentRed),
+                    RadioItem::new("Accent: Green", Message::AccentGreen),
+                    RadioItem::new("Accent: Blue", Message::AccentBlue),
+                ],
+                enabled: true,
+                visible: true,
+            }
+            .into(),
+            MenuItem::Submenu(trayinit::Submenu::new(
+                "Session",
+                vec![
+                    StandardItem::new("Reset tick counter", Message::ResetTicks).into(),
+                    MenuItem::Separator,
+                    StandardItem::new("Quit", Message::Quit).into(),
+                ],
+            )),
+        ]
+    }
+
+    fn event(&mut self, event: TrayEvent<Self::Message>) {
         match event {
-            TrayEvent::Menu(MenuId::ToggleTicks) => {
+            TrayEvent::Menu(Message::ToggleTicks) => {
                 self.ticks_enabled = !self.ticks_enabled;
             },
-            TrayEvent::Menu(MenuId::TogglePrimaryClickMenu) => {
+            TrayEvent::Menu(Message::TogglePrimaryClickMenu) => {
                 self.menu_on_primary_click = !self.menu_on_primary_click;
             },
-            TrayEvent::Menu(MenuId::ResetTicks) => {
+            TrayEvent::Menu(Message::ResetTicks) => {
                 self.tick_count = 0;
             },
-            TrayEvent::Menu(MenuId::AccentRed) => {
+            TrayEvent::Menu(Message::AccentRed) => {
                 self.accent = Accent::Red;
             },
-            TrayEvent::Menu(MenuId::AccentGreen) => {
+            TrayEvent::Menu(Message::AccentGreen) => {
                 self.accent = Accent::Green;
             },
-            TrayEvent::Menu(MenuId::AccentBlue) => {
+            TrayEvent::Menu(Message::AccentBlue) => {
                 self.accent = Accent::Blue;
             },
-            TrayEvent::Menu(MenuId::Quit) => {
+            TrayEvent::Menu(Message::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },
             TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
@@ -139,15 +147,14 @@ impl Tray for ShowcaseTray {
 
 fn main() {
     let keep_running = Arc::new(AtomicBool::new(true));
-    let handle = ShowcaseTray {
+    let tray = ShowcaseTray {
         ticks_enabled: true,
         menu_on_primary_click: false,
         tick_count: 0,
         accent: Accent::Blue,
         keep_running: Arc::clone(&keep_running),
-    }
-    .spawn()
-    .expect("spawn showcase tray example");
+    };
+    let handle = tray.spawn().expect("spawn showcase tray example");
 
     println!("Running showcase tray example.");
     println!("Startup mode: spawn() self-hosted tray.");

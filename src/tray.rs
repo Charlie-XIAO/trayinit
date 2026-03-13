@@ -6,17 +6,49 @@ use crate::{ClosedError, Error, Icon, Result, menu::MenuItem, platform};
 
 /// User-defined tray state.
 pub trait Tray: Sized + Send + 'static {
-    /// Application-defined identifier type for menu items.
-    type MenuId: Clone + Eq + Hash + Send + Sync + 'static;
+    /// Application-defined message type emitted by menu items.
+    type Message: Clone + Eq + Hash + Send + Sync + 'static;
 
     /// Stable identifier for the tray instance.
     fn id(&self) -> &str;
 
-    /// Renders the current tray state.
-    fn view(&self) -> TrayView<Self::MenuId>;
+    /// Tray icon image.
+    fn icon(&self) -> Option<Icon> {
+        None
+    }
+
+    /// Tray title or label, if supported by the platform.
+    fn title(&self) -> Option<String> {
+        None
+    }
+
+    /// Tray tooltip text.
+    fn tooltip(&self) -> Option<String> {
+        None
+    }
+
+    /// Whether the tray should be visible.
+    fn visible(&self) -> bool {
+        true
+    }
+
+    /// High-level tray state hint.
+    fn status(&self) -> TrayStatus {
+        TrayStatus::Active
+    }
+
+    /// Whether primary activation should open the menu.
+    fn menu_on_primary_click(&self) -> bool {
+        false
+    }
+
+    /// Declarative tray menu tree.
+    fn menu(&self) -> Vec<MenuItem<Self::Message>> {
+        Vec::new()
+    }
 
     /// Applies a tray-originated event back into the state.
-    fn event(&mut self, event: TrayEvent<Self::MenuId>);
+    fn event(&mut self, event: TrayEvent<Self::Message>);
 }
 
 /// Blanket convenience methods for [`Tray`] implementations.
@@ -59,32 +91,6 @@ mod private {
     impl<T: crate::Tray> Sealed for T {}
 }
 
-/// Fully rendered tray snapshot.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TrayView<Id> {
-    pub icon: Option<Icon>,
-    pub title: Option<String>,
-    pub tooltip: Option<String>,
-    pub visible: bool,
-    pub status: TrayStatus,
-    pub menu_on_primary_click: bool,
-    pub menu: Vec<MenuItem<Id>>,
-}
-
-impl<Id> Default for TrayView<Id> {
-    fn default() -> Self {
-        Self {
-            icon: None,
-            title: None,
-            tooltip: None,
-            visible: true,
-            status: TrayStatus::Active,
-            menu_on_primary_click: false,
-            menu: Vec::new(),
-        }
-    }
-}
-
 /// High-level tray visibility/importance hint.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TrayStatus {
@@ -96,11 +102,11 @@ pub enum TrayStatus {
 
 /// Event emitted from a tray backend into [`Tray::event`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TrayEvent<Id> {
+pub enum TrayEvent<Message> {
     Activate(ActivateEvent),
     SecondaryActivate(ActivateEvent),
     Scroll(ScrollEvent),
-    Menu(Id),
+    Menu(Message),
 }
 
 /// Activation metadata for tray clicks.

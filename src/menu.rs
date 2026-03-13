@@ -4,19 +4,19 @@ use crate::Icon;
 
 /// Declarative tray menu tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MenuItem<Id> {
-    Standard(StandardItem<Id>),
-    Check(CheckItem<Id>),
-    RadioGroup(RadioGroup<Id>),
-    Submenu(Submenu<Id>),
+pub enum MenuItem<Message> {
+    Standard(StandardItem<Message>),
+    Check(CheckItem<Message>),
+    RadioGroup(RadioGroup<Message>),
+    Submenu(Submenu<Message>),
     Separator,
 }
 
-impl<Id> MenuItem<Id> {
-    pub fn id(&self) -> Option<&Id> {
+impl<Message> MenuItem<Message> {
+    pub fn message(&self) -> Option<&Message> {
         match self {
-            MenuItem::Standard(item) => Some(&item.id),
-            MenuItem::Check(item) => Some(&item.id),
+            MenuItem::Standard(item) => Some(&item.message),
+            MenuItem::Check(item) => Some(&item.message),
             MenuItem::RadioGroup(_) => None,
             MenuItem::Submenu(_) => None,
             MenuItem::Separator => None,
@@ -24,34 +24,34 @@ impl<Id> MenuItem<Id> {
     }
 }
 
-impl<Id> From<StandardItem<Id>> for MenuItem<Id> {
-    fn from(value: StandardItem<Id>) -> Self {
+impl<Message> From<StandardItem<Message>> for MenuItem<Message> {
+    fn from(value: StandardItem<Message>) -> Self {
         Self::Standard(value)
     }
 }
 
-impl<Id> From<CheckItem<Id>> for MenuItem<Id> {
-    fn from(value: CheckItem<Id>) -> Self {
+impl<Message> From<CheckItem<Message>> for MenuItem<Message> {
+    fn from(value: CheckItem<Message>) -> Self {
         Self::Check(value)
     }
 }
 
-impl<Id> From<RadioGroup<Id>> for MenuItem<Id> {
-    fn from(value: RadioGroup<Id>) -> Self {
+impl<Message> From<RadioGroup<Message>> for MenuItem<Message> {
+    fn from(value: RadioGroup<Message>) -> Self {
         Self::RadioGroup(value)
     }
 }
 
-impl<Id> From<Submenu<Id>> for MenuItem<Id> {
-    fn from(value: Submenu<Id>) -> Self {
+impl<Message> From<Submenu<Message>> for MenuItem<Message> {
+    fn from(value: Submenu<Message>) -> Self {
         Self::Submenu(value)
     }
 }
 
 /// A normal clickable menu item.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StandardItem<Id> {
-    pub id: Id,
+pub struct StandardItem<Message> {
+    pub message: Message,
     pub label: String,
     pub enabled: bool,
     pub visible: bool,
@@ -59,10 +59,10 @@ pub struct StandardItem<Id> {
     pub accelerator: Option<Accelerator>,
 }
 
-impl<Id> StandardItem<Id> {
-    pub fn new(id: Id, label: impl Into<String>) -> Self {
+impl<Message> StandardItem<Message> {
+    pub fn new(label: impl Into<String>, message: Message) -> Self {
         Self {
-            id,
+            message,
             label: label.into(),
             enabled: true,
             visible: true,
@@ -74,8 +74,8 @@ impl<Id> StandardItem<Id> {
 
 /// A checkable menu item.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckItem<Id> {
-    pub id: Id,
+pub struct CheckItem<Message> {
+    pub message: Message,
     pub label: String,
     pub enabled: bool,
     pub visible: bool,
@@ -84,10 +84,10 @@ pub struct CheckItem<Id> {
     pub accelerator: Option<Accelerator>,
 }
 
-impl<Id> CheckItem<Id> {
-    pub fn new(id: Id, label: impl Into<String>, checked: bool) -> Self {
+impl<Message> CheckItem<Message> {
+    pub fn new(label: impl Into<String>, checked: bool, message: Message) -> Self {
         Self {
-            id,
+            message,
             label: label.into(),
             enabled: true,
             visible: true,
@@ -100,15 +100,15 @@ impl<Id> CheckItem<Id> {
 
 /// A radio item group.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RadioGroup<Id> {
-    pub selected: Option<Id>,
-    pub options: Vec<RadioItem<Id>>,
+pub struct RadioGroup<Message> {
+    pub selected: Option<Message>,
+    pub options: Vec<RadioItem<Message>>,
     pub enabled: bool,
     pub visible: bool,
 }
 
-impl<Id> RadioGroup<Id> {
-    pub fn new(options: Vec<RadioItem<Id>>) -> Self {
+impl<Message> RadioGroup<Message> {
+    pub fn new(options: Vec<RadioItem<Message>>) -> Self {
         Self {
             selected: None,
             options,
@@ -120,8 +120,8 @@ impl<Id> RadioGroup<Id> {
 
 /// An option within a radio group.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RadioItem<Id> {
-    pub id: Id,
+pub struct RadioItem<Message> {
+    pub message: Message,
     pub label: String,
     pub enabled: bool,
     pub visible: bool,
@@ -129,10 +129,10 @@ pub struct RadioItem<Id> {
     pub accelerator: Option<Accelerator>,
 }
 
-impl<Id> RadioItem<Id> {
-    pub fn new(id: Id, label: impl Into<String>) -> Self {
+impl<Message> RadioItem<Message> {
+    pub fn new(label: impl Into<String>, message: Message) -> Self {
         Self {
-            id,
+            message,
             label: label.into(),
             enabled: true,
             visible: true,
@@ -144,16 +144,16 @@ impl<Id> RadioItem<Id> {
 
 /// A non-clickable menu branch.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Submenu<Id> {
+pub struct Submenu<Message> {
     pub label: String,
     pub enabled: bool,
     pub visible: bool,
     pub icon: Option<Icon>,
-    pub children: Vec<MenuItem<Id>>,
+    pub children: Vec<MenuItem<Message>>,
 }
 
-impl<Id> Submenu<Id> {
-    pub fn new(label: impl Into<String>, children: Vec<MenuItem<Id>>) -> Self {
+impl<Message> Submenu<Message> {
+    pub fn new(label: impl Into<String>, children: Vec<MenuItem<Message>>) -> Self {
         Self {
             label: label.into(),
             enabled: true,

@@ -29,14 +29,14 @@ use super::util::encode_wide;
 const MENU_SUBCLASS_ID: usize = 200;
 
 #[derive(Debug)]
-pub(crate) struct RenderedMenu<Id> {
+pub(crate) struct RenderedMenu<Message> {
     root: HMENU,
     items: Vec<NativeMenuItem>,
-    command_map: HashMap<u32, Id>,
+    command_map: HashMap<u32, Message>,
 }
 
-impl<Id: Clone + Eq> RenderedMenu<Id> {
-    pub(crate) fn from_model(items: &[NormalizedMenuItem<Id>]) -> Option<Self> {
+impl<Message: Clone + Eq> RenderedMenu<Message> {
+    pub(crate) fn from_model(items: &[NormalizedMenuItem<Message>]) -> Option<Self> {
         let root = unsafe { CreatePopupMenu() };
         if root.is_null() {
             return None;
@@ -66,11 +66,11 @@ impl<Id: Clone + Eq> RenderedMenu<Id> {
         self.root
     }
 
-    pub(crate) fn resolve(&self, command: u32) -> Option<Id> {
+    pub(crate) fn resolve(&self, command: u32) -> Option<Message> {
         self.command_map.get(&command).cloned()
     }
 
-    pub(crate) fn apply_patches(&mut self, patches: &[MenuPatch<Id>]) -> bool {
+    pub(crate) fn apply_patches(&mut self, patches: &[MenuPatch<Message>]) -> bool {
         for patch in patches {
             let ok = match patch {
                 MenuPatch::Command { path, item } => {
@@ -89,7 +89,11 @@ impl<Id: Clone + Eq> RenderedMenu<Id> {
         true
     }
 
-    fn apply_command_patch(&mut self, path: &[usize], item: &NormalizedCommandItem<Id>) -> bool {
+    fn apply_command_patch(
+        &mut self,
+        path: &[usize],
+        item: &NormalizedCommandItem<Message>,
+    ) -> bool {
         let Some((parent, position, node)) = Self::locate_mut(self.root, &mut self.items, path)
         else {
             return false;
@@ -119,11 +123,11 @@ impl<Id: Clone + Eq> RenderedMenu<Id> {
         }
 
         node.bitmap = bitmap;
-        self.command_map.insert(command, item.id.clone());
+        self.command_map.insert(command, item.message.clone());
         true
     }
 
-    fn apply_submenu_patch(&mut self, path: &[usize], item: &NormalizedSubmenu<Id>) -> bool {
+    fn apply_submenu_patch(&mut self, path: &[usize], item: &NormalizedSubmenu<Message>) -> bool {
         let Some((parent, position, node)) = Self::locate_mut(self.root, &mut self.items, path)
         else {
             return false;
@@ -177,7 +181,7 @@ impl<Id: Clone + Eq> RenderedMenu<Id> {
     }
 }
 
-impl<Id> Drop for RenderedMenu<Id> {
+impl<Message> Drop for RenderedMenu<Message> {
     fn drop(&mut self) {
         unsafe {
             DestroyMenu(self.root);
@@ -204,16 +208,16 @@ enum NativeMenuItemKind {
     },
 }
 
-struct MenuBuilder<Id> {
+struct MenuBuilder<Message> {
     next_command: u32,
-    command_map: HashMap<u32, Id>,
+    command_map: HashMap<u32, Message>,
 }
 
-impl<Id: Clone + Eq> MenuBuilder<Id> {
+impl<Message: Clone + Eq> MenuBuilder<Message> {
     fn append_items(
         &mut self,
         parent: HMENU,
-        items: &[NormalizedMenuItem<Id>],
+        items: &[NormalizedMenuItem<Message>],
     ) -> Vec<NativeMenuItem> {
         let mut rendered = Vec::with_capacity(items.len());
 
@@ -230,7 +234,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
         &mut self,
         parent: HMENU,
         position: u32,
-        item: &NormalizedMenuItem<Id>,
+        item: &NormalizedMenuItem<Message>,
     ) -> Option<NativeMenuItem> {
         match item {
             NormalizedMenuItem::Separator => {
@@ -253,7 +257,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
         &mut self,
         parent: HMENU,
         position: u32,
-        item: &NormalizedCommandItem<Id>,
+        item: &NormalizedCommandItem<Message>,
     ) -> Option<NativeMenuItem> {
         let command = self.next_command();
         let text = encode_wide(label_with_accelerator(
@@ -271,7 +275,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
 
         let bitmap = bitmap_from_icon(item.icon.as_ref());
         set_menu_bitmap_by_position(parent, position, bitmap.as_ref());
-        self.command_map.insert(command, item.id.clone());
+        self.command_map.insert(command, item.message.clone());
 
         Some(NativeMenuItem {
             bitmap,
@@ -283,7 +287,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
         &mut self,
         parent: HMENU,
         position: u32,
-        submenu: &NormalizedSubmenu<Id>,
+        submenu: &NormalizedSubmenu<Message>,
     ) -> Option<NativeMenuItem> {
         let popup = unsafe { CreatePopupMenu() };
         if popup.is_null() {
