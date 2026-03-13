@@ -1,20 +1,14 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use trayinit::{
     ActionItem, CheckItem, Handle, MenuItem, Tooltip, Tray, TrayEvent, TrayMethods, TrayView,
 };
-use winit::{
-    application::ApplicationHandler,
-    event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::WindowId,
-};
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::window::WindowId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MenuId {
@@ -55,11 +49,11 @@ impl Tray for WinitTray {
         match event {
             TrayEvent::Menu(MenuId::ToggleTicks) => {
                 self.ticking = !self.ticking;
-            }
+            },
             TrayEvent::Menu(MenuId::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
-            }
-            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {}
+            },
+            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
         }
     }
 }

@@ -5,7 +5,8 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 /// Top-level tray API error.
 #[derive(Debug)]
 pub enum Error {
-    /// The requested backend path exists in the API, but is not implemented yet.
+    /// The requested backend path exists in the API, but is not implemented
+    /// yet.
     NotImplemented,
     /// The tray service rejected the request because it is already closed.
     Closed,

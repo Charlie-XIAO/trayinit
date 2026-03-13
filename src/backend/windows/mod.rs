@@ -3,36 +3,27 @@ mod icon;
 mod menu;
 mod util;
 
-use std::{
-    io, ptr,
-    sync::{
-        Arc, Mutex, MutexGuard, OnceLock,
-        atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering},
-        mpsc,
-    },
-    thread,
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
+use std::{io, ptr, thread};
+
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM};
+use windows_sys::Win32::UI::Shell::{
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect, Shell_NotifyIconW,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CREATESTRUCTW, CW_USEDEFAULT, ChangeWindowMessageFilterEx, CreateWindowExW, DefWindowProcW,
+    DestroyWindow, DispatchMessageW, GWL_USERDATA, GetCursorPos, GetMessageW, MSG, MSGFLT_ALLOW,
+    PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageA, TranslateMessage,
+    WM_CLOSE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_NCCREATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    WS_OVERLAPPED,
 };
 
-use windows_sys::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM},
-    UI::{
-        Shell::{
-            NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-            NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect, Shell_NotifyIconW,
-        },
-        WindowsAndMessaging::{
-            CREATESTRUCTW, CW_USEDEFAULT, ChangeWindowMessageFilterEx, CreateWindowExW,
-            DefWindowProcW, DestroyWindow, DispatchMessageW, GWL_USERDATA, GetCursorPos,
-            GetMessageW, MSG, MSGFLT_ALLOW, PostMessageW, PostQuitMessage, RegisterClassW,
-            RegisterWindowMessageA, TranslateMessage, WM_CLOSE, WM_CREATE, WM_DESTROY,
-            WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN,
-            WM_MBUTTONUP, WM_NCCREATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WNDCLASSW,
-            WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_OVERLAPPED,
-        },
-    },
-};
-
-use self::{icon::OwnedIcon, menu::RenderedMenu};
+use self::icon::OwnedIcon;
+use self::menu::RenderedMenu;
 use crate::{
     ActivateEvent, Builder, ClosedError, Error, Handle, PhysicalPosition, PhysicalSize, Rect,
     RuntimePreference, Tray, TrayEvent, TrayView,
@@ -141,17 +132,18 @@ fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<cra
         Ok(()) => {
             let _ = init_tx.send(Ok(()));
             message_loop();
-        }
+        },
         Err(error) => {
             let _ = init_tx.send(Err(error));
-        }
+        },
     }
 }
 
 fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> crate::Result<()> {
     // Reference: winit/src/platform_impl/windows/dpi.rs::become_dpi_aware.
     util::become_dpi_aware();
-    // Reference: tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_app.
+    // Reference:
+    // tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_app.
     dark_menu_bar::enable_dark_mode_for_app();
 
     let class_name = util::encode_wide("trayinit_hidden_window");
@@ -263,7 +255,7 @@ unsafe extern "system" fn window_proc(
                 util::set_window_long(hwnd, GWL_USERDATA, create_struct.lpCreateParams as isize);
             }
             return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
-        }
+        },
         (0, WM_CREATE) => return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
         (0, _) => return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
         _ => user_data_ptr as *mut WindowUserData,
@@ -275,11 +267,11 @@ unsafe extern "system" fn window_proc(
         WM_USER_REFRESH => {
             user_data.ops.on_refresh();
             return 0;
-        }
+        },
         WM_USER_TRAYICON => {
             user_data.ops.on_tray_message(lparam);
             return 0;
-        }
+        },
         WM_DESTROY => {
             user_data.ops.on_destroy();
             unsafe {
@@ -287,12 +279,12 @@ unsafe extern "system" fn window_proc(
                 PostQuitMessage(0);
             }
             return 0;
-        }
+        },
         _ if msg == taskbar_created_message() => {
             user_data.ops.on_taskbar_created();
             return 0;
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
@@ -389,10 +381,12 @@ impl<T: Tray> WindowOps for WindowState<T> {
     fn set_hwnd(&mut self, hwnd: HWND) {
         self.native.hwnd = hwnd;
         self.shared.hwnd.store(hwnd as isize, Ordering::Release);
-        // Reference: tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_window.
+        // Reference:
+        // tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_window.
         dark_menu_bar::enable_dark_mode_for_window(hwnd);
         // Reference: tray-icon/src/platform_impl/windows/mod.rs::TrayIcon::new
-        // together with muda/src/platform_impl/windows/mod.rs::attach_menu_subclass_for_hwnd.
+        // together with
+        // muda/src/platform_impl/windows/mod.rs::attach_menu_subclass_for_hwnd.
         menu::attach_window_subclass(hwnd);
     }
 
@@ -427,20 +421,20 @@ impl<T: Tray> WindowOps for WindowState<T> {
                 } else {
                     self.dispatch_event(TrayEvent::Activate(self.activate_event()));
                 }
-            }
+            },
             WM_RBUTTONUP => {
                 if self.native.menu.is_some() {
                     let _ = self.show_menu();
                 } else {
                     self.dispatch_event(TrayEvent::SecondaryActivate(self.activate_event()));
                 }
-            }
+            },
             WM_MBUTTONUP => {
                 self.dispatch_event(TrayEvent::SecondaryActivate(self.activate_event()));
-            }
+            },
             WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_LBUTTONDBLCLK
-            | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK => {}
-            _ => {}
+            | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK => {},
+            _ => {},
         }
     }
 
@@ -507,7 +501,8 @@ struct NativeState<Id> {
     menu_on_primary_click: bool,
 }
 
-// SAFETY: NativeState is only ever accessed on the dedicated Windows backend thread.
+// SAFETY: NativeState is only ever accessed on the dedicated Windows backend
+// thread.
 unsafe impl<Id: Send> Send for NativeState<Id> {}
 
 impl<Id> NativeState<Id> {

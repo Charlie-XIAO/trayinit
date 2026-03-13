@@ -1,22 +1,19 @@
-use std::{collections::HashMap, ptr};
+use std::collections::HashMap;
+use std::ptr;
 
-use windows_sys::Win32::{
-    Foundation::{FALSE, HWND, LPARAM, LRESULT, POINT, WPARAM},
-    UI::{
-        Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
-        WindowsAndMessaging::{
-            AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED,
-            MF_DISABLED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MIIM_BITMAP,
-            SetForegroundWindow, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
-            TrackPopupMenu, WM_NCACTIVATE, WM_NCPAINT,
-        },
-    },
+use windows_sys::Win32::Foundation::{FALSE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED, MF_DISABLED,
+    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MIIM_BITMAP, SetForegroundWindow,
+    SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TrackPopupMenu, WM_NCACTIVATE,
+    WM_NCPAINT,
 };
 
-use crate::{Accelerator, MenuItem};
-
+use super::dark_menu_bar;
+use super::icon::OwnedBitmap;
 use super::util::encode_wide;
-use super::{dark_menu_bar, icon::OwnedBitmap};
+use crate::{Accelerator, MenuItem};
 
 const MENU_SUBCLASS_ID: usize = 200;
 
@@ -94,7 +91,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
                     AppendMenuW(parent, MF_SEPARATOR, 0, ptr::null());
                 }
                 self.added_items += 1;
-            }
+            },
             MenuItem::Action(action) if action.visible => {
                 let command = self.next_command();
                 let text = encode_wide(label_with_accelerator(
@@ -111,7 +108,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
                 self.command_map.insert(command, action.id.clone());
                 self.add_icon(parent, command, action.icon.as_ref());
                 self.added_items += 1;
-            }
+            },
             MenuItem::Check(check) if check.visible => {
                 let command = self.next_command();
                 let text = encode_wide(label_with_accelerator(
@@ -133,7 +130,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
                 self.command_map.insert(command, check.id.clone());
                 self.add_icon(parent, command, check.icon.as_ref());
                 self.added_items += 1;
-            }
+            },
             MenuItem::RadioGroup(group) if group.visible => {
                 for option in group.options.iter().filter(|option| option.visible) {
                     let command = self.next_command();
@@ -157,7 +154,7 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
                     self.add_icon(parent, command, option.icon.as_ref());
                     self.added_items += 1;
                 }
-            }
+            },
             MenuItem::Submenu(submenu) if submenu.visible => {
                 let popup = unsafe { CreatePopupMenu() };
                 if popup.is_null() {
@@ -173,8 +170,8 @@ impl<Id: Clone + Eq> MenuBuilder<Id> {
                     AppendMenuW(parent, flags, popup as usize, text.as_ptr());
                 }
                 self.added_items += 1;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -236,7 +233,8 @@ pub(crate) fn show_popup_menu(hwnd: HWND, menu: HMENU) -> Option<u32> {
 
 pub(crate) fn attach_window_subclass(hwnd: HWND) {
     unsafe {
-        // Reference: muda/src/platform_impl/windows/mod.rs::attach_menu_subclass_for_hwnd.
+        // Reference:
+        // muda/src/platform_impl/windows/mod.rs::attach_menu_subclass_for_hwnd.
         SetWindowSubclass(hwnd, Some(menu_subclass_proc), MENU_SUBCLASS_ID, 0);
     }
 }
@@ -268,14 +266,14 @@ unsafe extern "system" fn menu_subclass_proc(
             } else {
                 unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
             }
-        }
+        },
         WM_NCACTIVATE | WM_NCPAINT => {
             let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
             if dark_menu_bar::should_use_dark_mode(hwnd) {
                 dark_menu_bar::draw(hwnd, msg, wparam, lparam);
             }
             result
-        }
+        },
         _ => unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) },
     }
 }

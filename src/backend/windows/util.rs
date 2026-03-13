@@ -3,18 +3,14 @@ use std::os::windows::prelude::OsStrExt;
 use std::sync::Once;
 
 use once_cell::sync::Lazy;
-use windows_sys::Win32::{
-    Foundation::{FARPROC, HWND},
-    System::LibraryLoader::{GetProcAddress, LoadLibraryW},
-    UI::{
-        HiDpi::{
-            DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
-            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, PROCESS_DPI_AWARENESS,
-            PROCESS_PER_MONITOR_DPI_AWARE,
-        },
-        WindowsAndMessaging::WINDOW_LONG_PTR_INDEX,
-    },
+use windows_sys::Win32::Foundation::{FARPROC, HWND};
+use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, PROCESS_DPI_AWARENESS,
+    PROCESS_PER_MONITOR_DPI_AWARE,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::WINDOW_LONG_PTR_INDEX;
 
 pub fn encode_wide(value: impl AsRef<OsStr>) -> Vec<u16> {
     value

@@ -1,12 +1,12 @@
 use std::{io, ptr};
 
-use windows_sys::Win32::{
-    Foundation::RECT,
-    Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
-        DeleteDC, DeleteObject, GetDC, HBITMAP, ReleaseDC, SelectObject,
-    },
-    UI::WindowsAndMessaging::{CreateIcon, DI_NORMAL, DestroyIcon, DrawIconEx, HICON},
+use windows_sys::Win32::Foundation::RECT;
+use windows_sys::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
+    DeleteDC, DeleteObject, GetDC, HBITMAP, ReleaseDC, SelectObject,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CreateIcon, DI_NORMAL, DestroyIcon, DrawIconEx, HICON,
 };
 
 use crate::{Error, Icon};
@@ -23,7 +23,8 @@ impl OwnedIcon {
     }
 
     pub(crate) fn from_icon(icon: &Icon) -> Result<Self, Error> {
-        // Reference: tray-icon/src/platform_impl/windows/icon.rs::RgbaIcon::into_windows_icon
+        // Reference:
+        // tray-icon/src/platform_impl/windows/icon.rs::RgbaIcon::into_windows_icon
         // and muda/src/platform_impl/windows/icon.rs::RgbaIcon::into_windows_icon.
         let mut bgra = icon.rgba().to_vec();
         let pixel_count = bgra.len() / 4;

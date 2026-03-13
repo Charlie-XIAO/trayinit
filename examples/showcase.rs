@@ -1,11 +1,7 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread,
-    time::Duration,
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use trayinit::{
     ActionItem, CheckItem, Icon, MenuItem, RadioGroup, RadioItem, Tooltip, Tray, TrayEvent,
@@ -120,26 +116,26 @@ impl Tray for ShowcaseTray {
         match event {
             TrayEvent::Menu(MenuId::ToggleTicks) => {
                 self.ticks_enabled = !self.ticks_enabled;
-            }
+            },
             TrayEvent::Menu(MenuId::TogglePrimaryClickMenu) => {
                 self.menu_on_primary_click = !self.menu_on_primary_click;
-            }
+            },
             TrayEvent::Menu(MenuId::ResetTicks) => {
                 self.tick_count = 0;
-            }
+            },
             TrayEvent::Menu(MenuId::AccentRed) => {
                 self.accent = Accent::Red;
-            }
+            },
             TrayEvent::Menu(MenuId::AccentGreen) => {
                 self.accent = Accent::Green;
-            }
+            },
             TrayEvent::Menu(MenuId::AccentBlue) => {
                 self.accent = Accent::Blue;
-            }
+            },
             TrayEvent::Menu(MenuId::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
-            }
-            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {}
+            },
+            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
         }
     }
 }

@@ -3,29 +3,22 @@
 
 #![allow(non_snake_case, clippy::upper_case_acronyms)]
 
-use std::{cell::Cell, sync::Once};
+use std::cell::Cell;
+use std::sync::Once;
 
 use once_cell::sync::Lazy;
-use windows_sys::{
-    Win32::{
-        Foundation::{HWND, LPARAM, NTSTATUS, RECT, WPARAM},
-        Graphics::Gdi::*,
-        System::{
-            LibraryLoader::{GetProcAddress, LoadLibraryA},
-            SystemInformation::OSVERSIONINFOW,
-        },
-        UI::{
-            Accessibility::HIGHCONTRASTA,
-            Controls::*,
-            WindowsAndMessaging::{
-                GetClientRect, GetMenuBarInfo, GetMenuItemInfoW, GetWindowRect, HMENU, MENUBARINFO,
-                MENUITEMINFOW, MIIM_STRING, OBJID_MENU, SPI_GETHIGHCONTRAST, SystemParametersInfoA,
-                WM_NCACTIVATE, WM_NCPAINT,
-            },
-        },
-    },
-    s,
+use windows_sys::Win32::Foundation::{HWND, LPARAM, NTSTATUS, RECT, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
+use windows_sys::Win32::UI::Accessibility::HIGHCONTRASTA;
+use windows_sys::Win32::UI::Controls::*;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetClientRect, GetMenuBarInfo, GetMenuItemInfoW, GetWindowRect, HMENU, MENUBARINFO,
+    MENUITEMINFOW, MIIM_STRING, OBJID_MENU, SPI_GETHIGHCONTRAST, SystemParametersInfoA,
+    WM_NCACTIVATE, WM_NCPAINT,
 };
+use windows_sys::s;
 
 pub const WM_UAHDRAWMENU: u32 = 0x0091;
 pub const WM_UAHDRAWMENUITEM: u32 = 0x0092;
@@ -146,7 +139,7 @@ pub fn draw(hwnd: HWND, msg: u32, _wparam: WPARAM, lparam: LPARAM) {
                 FillRect(hdc, &annoying_rect, background_brush());
                 ReleaseDC(hwnd, hdc);
             }
-        }
+        },
         WM_UAHDRAWMENU => {
             let menu = lparam as *const UAHMENU;
 
@@ -175,7 +168,7 @@ pub fn draw(hwnd: HWND, msg: u32, _wparam: WPARAM, lparam: LPARAM) {
             unsafe {
                 FillRect((*menu).hdc, &rect, background_brush());
             }
-        }
+        },
         WM_UAHDRAWMENUITEM => {
             let menu_item = lparam as *mut UAHDRAWMENUITEM;
 
@@ -243,8 +236,8 @@ pub fn draw(hwnd: HWND, msg: u32, _wparam: WPARAM, lparam: LPARAM) {
                     draw_flags,
                 );
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -298,7 +291,8 @@ pub fn enable_dark_mode_for_app() {
             return;
         }
 
-        // Reference: tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_app.
+        // Reference:
+        // tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_app.
         const UXTHEME_ALLOWDARKMODEFORAPP_ORDINAL: u16 = 135;
         type AllowDarkModeForApp = unsafe extern "system" fn(bool) -> bool;
         static ALLOW_DARK_MODE_FOR_APP: Lazy<Option<AllowDarkModeForApp>> = Lazy::new(|| unsafe {
@@ -339,13 +333,13 @@ pub fn enable_dark_mode_for_app() {
                 if let Some(allow_dark_mode_for_app) = *ALLOW_DARK_MODE_FOR_APP {
                     unsafe { allow_dark_mode_for_app(true) };
                 }
-            }
+            },
             Some(_) => {
                 if let Some(set_preferred_app_mode) = *SET_PREFERRED_APP_MODE {
                     unsafe { set_preferred_app_mode(PreferredAppMode::AllowDark) };
                 }
-            }
-            None => {}
+            },
+            None => {},
         }
 
         refresh_immersive_color_policy_state();
@@ -353,7 +347,8 @@ pub fn enable_dark_mode_for_app() {
 }
 
 pub fn enable_dark_mode_for_window(hwnd: HWND) {
-    // Reference: tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_window.
+    // Reference:
+    // tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_window.
     const UXTHEME_ALLOWDARKMODEFORWINDOW_ORDINAL: u16 = 133;
     type AllowDarkModeForWindow = unsafe extern "system" fn(HWND, bool) -> bool;
     static ALLOW_DARK_MODE_FOR_WINDOW: Lazy<Option<AllowDarkModeForWindow>> =
@@ -377,7 +372,9 @@ pub fn enable_dark_mode_for_window(hwnd: HWND) {
 }
 
 fn refresh_immersive_color_policy_state() {
-    // Reference: tao/src/platform_impl/windows/dark_mode.rs::refresh_immersive_color_policy_state.
+    // Reference:
+    // tao/src/platform_impl/windows/dark_mode.
+    // rs::refresh_immersive_color_policy_state.
     const UXTHEME_REFRESHIMMERSIVECOLORPOLICYSTATE_ORDINAL: u16 = 104;
     type RefreshImmersiveColorPolicyState = unsafe extern "system" fn();
     static REFRESH_IMMERSIVE_COLOR_POLICY_STATE: Lazy<Option<RefreshImmersiveColorPolicyState>> =

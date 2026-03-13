@@ -73,7 +73,6 @@ pub use menu::{
 };
 pub use tooltip::Tooltip;
 pub use tray::{
-    ActivateEvent, Builder, Handle, LinuxOptions, RuntimePreference, ScrollAxis, ScrollEvent,
-    Tray, TrayEvent, TrayMethods, TrayStatus, TrayView,
+    ActivateEvent, Builder, Handle, LinuxOptions, RuntimePreference, ScrollAxis, ScrollEvent, Tray,
+    TrayEvent, TrayMethods, TrayStatus, TrayView,
 };
-

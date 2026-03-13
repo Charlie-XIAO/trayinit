@@ -1,11 +1,7 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread,
-    time::Duration,
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use trayinit::{
     ActionItem, CheckItem, Handle, MenuItem, Tooltip, Tray, TrayEvent, TrayMethods, TrayView,
@@ -50,11 +46,11 @@ impl Tray for MinimalTray {
         match event {
             TrayEvent::Menu(MenuId::Toggle) => {
                 self.enabled = !self.enabled;
-            }
+            },
             TrayEvent::Menu(MenuId::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
-            }
-            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {}
+            },
+            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
         }
     }
 }
