@@ -2,7 +2,7 @@ use core::hash::Hash;
 #[cfg(not(windows))]
 use core::marker::PhantomData;
 
-use crate::{backend, ClosedError, Error, Icon, MenuItem, Result, Tooltip};
+use crate::{ClosedError, Error, Icon, MenuItem, Result, Tooltip, backend};
 
 /// User-defined tray state.
 pub trait Tray: Sized + Send + 'static {
@@ -26,9 +26,28 @@ pub trait TrayMethods: Tray + private::Sealed {
         Builder::new(self)
     }
 
-    /// Starts the tray service with default builder settings.
+    /// Starts the tray service in host-integrated mode.
+    ///
+    /// This is the preferred startup mode for windowed apps such as `winit`
+    /// applications. The backend does not own the app's top-level control flow.
+    fn attach(self) -> Result<Handle<Self>> {
+        self.builder().attach()
+    }
+
+    /// Starts the tray service in self-hosted non-blocking mode.
+    ///
+    /// This is mainly a convenience for backends that can own themselves on a
+    /// helper thread without taking over the caller's main thread.
     fn spawn(self) -> Result<Handle<Self>> {
         self.builder().spawn()
+    }
+
+    /// Runs the tray as a standalone application.
+    ///
+    /// This mode is intended for tray-only apps where the tray runtime should
+    /// own the application's top-level control flow.
+    fn run(self) -> Result<()> {
+        self.builder().run()
     }
 }
 
@@ -105,7 +124,7 @@ pub enum ScrollAxis {
     Vertical,
 }
 
-/// Spawn-time tray configuration.
+/// Startup-time tray configuration.
 #[derive(Debug)]
 pub struct Builder<T: Tray> {
     pub(crate) tray: T,
@@ -158,8 +177,16 @@ impl<T: Tray> Builder<T> {
         self.tray
     }
 
+    pub fn attach(self) -> Result<Handle<T>> {
+        backend::attach(self)
+    }
+
     pub fn spawn(self) -> Result<Handle<T>> {
         backend::spawn(self)
+    }
+
+    pub fn run(self) -> Result<()> {
+        backend::run(self)
     }
 }
 
@@ -203,7 +230,10 @@ pub struct Handle<T: Tray> {
 
 impl<T: Tray> Handle<T> {
     #[cfg(windows)]
-    pub(crate) fn new(tray_id: impl Into<String>, inner: crate::backend::PlatformHandle<T>) -> Self {
+    pub(crate) fn new(
+        tray_id: impl Into<String>,
+        inner: crate::backend::PlatformHandle<T>,
+    ) -> Self {
         Self {
             tray_id: tray_id.into(),
             inner,
@@ -289,5 +319,3 @@ impl From<ClosedError> for Error {
         Error::Closed
     }
 }
-
-

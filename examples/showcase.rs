@@ -157,6 +157,7 @@ fn main() {
     .expect("spawn showcase tray example");
 
     println!("Running showcase tray example.");
+    println!("Startup mode: spawn() self-hosted tray.");
     println!("Features in this example:");
     println!("- generated tray icon");
     println!("- tooltip/title updates");

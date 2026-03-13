@@ -69,6 +69,7 @@ fn main() {
     .expect("spawn minimal tray example");
 
     println!("Running minimal tray example.");
+    println!("Startup mode: spawn() self-hosted tray.");
     println!("Use the tray icon menu to toggle state or quit.");
 
     while keep_running.load(Ordering::Relaxed) {

@@ -78,8 +78,8 @@ impl ApplicationHandler for App {
                 ticks: 0,
                 keep_running: Arc::clone(&self.keep_running),
             }
-            .spawn()
-            .expect("spawn winit tray example");
+            .attach()
+            .expect("attach winit tray example");
             self.tray = Some(tray);
         }
 
@@ -121,6 +121,7 @@ impl ApplicationHandler for App {
 
 fn main() {
     println!("Running winit no-window tray example.");
+    println!("Startup mode: attach() host-integrated tray.");
     println!("No window is created. winit only owns the application loop.");
     println!("Use the tray menu to toggle ticking or quit.");
 
