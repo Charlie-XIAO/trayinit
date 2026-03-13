@@ -1,19 +1,24 @@
 use std::{collections::HashMap, ptr};
 
 use windows_sys::Win32::{
-    Foundation::{FALSE, HWND, POINT},
-    UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, DestroyMenu, SetForegroundWindow, SetMenuItemInfoW,
-        TrackPopupMenu, HMENU, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_POPUP,
-        MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MIIM_BITMAP, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-        TPM_RETURNCMD,
+    Foundation::{FALSE, HWND, LPARAM, LRESULT, POINT, WPARAM},
+    UI::{
+        Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
+        WindowsAndMessaging::{
+            AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED,
+            MF_DISABLED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MIIM_BITMAP,
+            SetForegroundWindow, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+            TrackPopupMenu, WM_NCACTIVATE, WM_NCPAINT,
+        },
     },
 };
 
 use crate::{Accelerator, MenuItem};
 
-use super::icon::OwnedBitmap;
 use super::util::encode_wide;
+use super::{dark_menu_bar, icon::OwnedBitmap};
+
+const MENU_SUBCLASS_ID: usize = 200;
 
 #[derive(Debug)]
 pub(crate) struct RenderedMenu<Id> {
@@ -226,5 +231,51 @@ pub(crate) fn show_popup_menu(hwnd: HWND, menu: HMENU) -> Option<u32> {
             ptr::null(),
         );
         (result > 0).then_some(result as u32)
+    }
+}
+
+pub(crate) fn attach_window_subclass(hwnd: HWND) {
+    unsafe {
+        // Reference: muda/src/platform_impl/windows/mod.rs::attach_menu_subclass_for_hwnd.
+        SetWindowSubclass(hwnd, Some(menu_subclass_proc), MENU_SUBCLASS_ID, 0);
+    }
+}
+
+pub(crate) fn detach_window_subclass(hwnd: HWND) {
+    if hwnd.is_null() {
+        return;
+    }
+
+    unsafe {
+        RemoveWindowSubclass(hwnd, Some(menu_subclass_proc), MENU_SUBCLASS_ID);
+    }
+}
+
+unsafe extern "system" fn menu_subclass_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _uidsubclass: usize,
+    _dwrefdata: usize,
+) -> LRESULT {
+    match msg {
+        dark_menu_bar::WM_UAHDRAWMENU | dark_menu_bar::WM_UAHDRAWMENUITEM => {
+            if dark_menu_bar::should_use_dark_mode(hwnd) {
+                // Reference: muda/src/platform_impl/windows/mod.rs::menu_subclass_proc.
+                dark_menu_bar::draw(hwnd, msg, wparam, lparam);
+                0
+            } else {
+                unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+            }
+        }
+        WM_NCACTIVATE | WM_NCPAINT => {
+            let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            if dark_menu_bar::should_use_dark_mode(hwnd) {
+                dark_menu_bar::draw(hwnd, msg, wparam, lparam);
+            }
+            result
+        }
+        _ => unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) },
     }
 }

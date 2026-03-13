@@ -1,3 +1,4 @@
+mod dark_menu_bar;
 mod icon;
 mod menu;
 mod util;
@@ -148,6 +149,11 @@ fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<cra
 }
 
 fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> crate::Result<()> {
+    // Reference: winit/src/platform_impl/windows/dpi.rs::become_dpi_aware.
+    util::become_dpi_aware();
+    // Reference: tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_app.
+    dark_menu_bar::enable_dark_mode_for_app();
+
     let class_name = util::encode_wide("trayinit_hidden_window");
     register_window_class(&class_name)?;
 
@@ -383,6 +389,11 @@ impl<T: Tray> WindowOps for WindowState<T> {
     fn set_hwnd(&mut self, hwnd: HWND) {
         self.native.hwnd = hwnd;
         self.shared.hwnd.store(hwnd as isize, Ordering::Release);
+        // Reference: tao/src/platform_impl/windows/dark_mode.rs::allow_dark_mode_for_window.
+        dark_menu_bar::enable_dark_mode_for_window(hwnd);
+        // Reference: tray-icon/src/platform_impl/windows/mod.rs::TrayIcon::new
+        // together with muda/src/platform_impl/windows/mod.rs::attach_menu_subclass_for_hwnd.
+        menu::attach_window_subclass(hwnd);
     }
 
     fn initial_render(&mut self) -> crate::Result<()> {
@@ -434,6 +445,7 @@ impl<T: Tray> WindowOps for WindowState<T> {
     }
 
     fn on_destroy(&mut self) {
+        menu::detach_window_subclass(self.native.hwnd);
         self.native.remove_tray_icon();
         self.shared.closed.store(true, Ordering::Release);
         self.shared.hwnd.store(0, Ordering::Release);
