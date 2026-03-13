@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use trayinit::{CheckItem, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods};
+use trayinit::menu::{CheckItem, MenuItem, StandardItem};
+use trayinit::{Tray, TrayEvent, TrayMethods};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Message {

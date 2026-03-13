@@ -5,7 +5,7 @@ mod util;
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
-use std::{io, ptr, thread};
+use std::{fmt, io, ptr, thread};
 
 use dpi::{PhysicalPosition, PhysicalSize};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM};
@@ -27,7 +27,7 @@ use self::icon::OwnedIcon;
 use self::menu::RenderedMenu;
 use crate::model::{MenuDiff, NormalizedTrayView, diff_menu_items};
 use crate::{
-    ActivateEvent, Builder, ClosedError, Error, Handle, RuntimePreference, Tray, TrayEvent,
+    ActivateEvent, Builder, ClosedError, Error, Handle, Result, RuntimePreference, Tray, TrayEvent,
 };
 
 const WM_USER_TRAYICON: u32 = 6002;
@@ -36,7 +36,8 @@ const WM_USER_REFRESH: u32 = 6003;
 static NEXT_INTERNAL_ID: AtomicU32 = AtomicU32::new(1);
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 
-pub(crate) struct PlatformHandle<T: Tray> {
+#[derive(Clone)]
+pub struct PlatformHandle<T: Tray> {
     shared: Arc<Shared<T>>,
 }
 
@@ -45,10 +46,7 @@ impl<T: Tray> PlatformHandle<T> {
         Self { shared }
     }
 
-    pub(crate) fn update<R>(
-        &self,
-        f: impl FnOnce(&mut T) -> R,
-    ) -> core::result::Result<R, ClosedError> {
+    pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, ClosedError> {
         if self.is_closed() {
             return Err(ClosedError);
         }
@@ -62,11 +60,11 @@ impl<T: Tray> PlatformHandle<T> {
         Ok(result)
     }
 
-    pub(crate) fn refresh(&self) -> core::result::Result<(), ClosedError> {
+    pub fn refresh(&self) -> Result<(), ClosedError> {
         self.shared.post_message(WM_USER_REFRESH)
     }
 
-    pub(crate) fn shutdown(&self) -> crate::Result<()> {
+    pub fn shutdown(&self) -> Result<()> {
         if self.is_closed() {
             return Ok(());
         }
@@ -74,28 +72,20 @@ impl<T: Tray> PlatformHandle<T> {
         self.shared.post_close().map_err(Error::from)
     }
 
-    pub(crate) fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.shared.closed.load(Ordering::Acquire)
     }
 }
 
-impl<T: Tray> Clone for PlatformHandle<T> {
-    fn clone(&self) -> Self {
-        Self {
-            shared: Arc::clone(&self.shared),
-        }
-    }
-}
-
-impl<T: Tray> std::fmt::Debug for PlatformHandle<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: Tray> fmt::Debug for PlatformHandle<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PlatformHandle")
             .field("closed", &self.is_closed())
             .finish()
     }
 }
 
-pub(crate) fn spawn<T: Tray>(builder: Builder<T>) -> crate::Result<Handle<T>> {
+pub fn spawn<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
     let Builder {
         tray,
         runtime_preference,
@@ -128,7 +118,18 @@ pub(crate) fn spawn<T: Tray>(builder: Builder<T>) -> crate::Result<Handle<T>> {
     }
 }
 
-fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<crate::Result<()>>) {
+pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
+    // TODO: This should be changed as we implement more stuff
+    spawn(builder)
+}
+
+pub fn run<T: crate::Tray>(builder: Builder<T>) -> Result<()> {
+    // TODO: Implement this
+    let _ = builder;
+    Err(Error::NotImplemented)
+}
+
+fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Result<()>>) {
     match run_backend_thread(shared) {
         Ok(()) => {
             let _ = init_tx.send(Ok(()));
@@ -140,7 +141,7 @@ fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<cra
     }
 }
 
-fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> crate::Result<()> {
+fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> Result<()> {
     // Reference: winit/src/platform_impl/windows/dpi.rs::become_dpi_aware.
     util::become_dpi_aware();
     // Reference:
@@ -205,7 +206,7 @@ fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> crate::Result<()> {
     Ok(())
 }
 
-fn register_window_class(class_name: &[u16]) -> crate::Result<()> {
+fn register_window_class(class_name: &[u16]) -> Result<()> {
     let hinstance = util::get_instance_handle();
     let window_class = WNDCLASSW {
         lpfnWndProc: Some(window_proc),
@@ -293,7 +294,7 @@ unsafe extern "system" fn window_proc(
 
 trait WindowOps: Send {
     fn set_hwnd(&mut self, hwnd: HWND);
-    fn initial_render(&mut self) -> crate::Result<()>;
+    fn initial_render(&mut self) -> Result<()>;
     fn on_refresh(&mut self);
     fn on_taskbar_created(&mut self);
     fn on_tray_message(&mut self, lparam: LPARAM);
@@ -317,7 +318,7 @@ impl<T: Tray> WindowState<T> {
         }
     }
 
-    fn render(&mut self) -> crate::Result<()> {
+    fn render(&mut self) -> Result<()> {
         let view = {
             let tray = self.shared.lock_tray();
             NormalizedTrayView::from_tray(&*tray)
@@ -456,7 +457,7 @@ impl<T: Tray> WindowOps for WindowState<T> {
         menu::attach_window_subclass(hwnd);
     }
 
-    fn initial_render(&mut self) -> crate::Result<()> {
+    fn initial_render(&mut self) -> Result<()> {
         self.render()
     }
 
@@ -539,7 +540,7 @@ impl<T: Tray> Shared<T> {
         (hwnd != 0).then_some(hwnd as HWND)
     }
 
-    fn post_message(&self, msg: u32) -> core::result::Result<(), ClosedError> {
+    fn post_message(&self, msg: u32) -> Result<(), ClosedError> {
         let hwnd = self.hwnd().ok_or(ClosedError)?;
         if unsafe { PostMessageW(hwnd, msg, 0, 0) } == 0 {
             return Err(ClosedError);
@@ -547,7 +548,7 @@ impl<T: Tray> Shared<T> {
         Ok(())
     }
 
-    fn post_close(&self) -> core::result::Result<(), ClosedError> {
+    fn post_close(&self) -> Result<(), ClosedError> {
         let hwnd = self.hwnd().ok_or(ClosedError)?;
         if unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) } == 0 {
             return Err(ClosedError);

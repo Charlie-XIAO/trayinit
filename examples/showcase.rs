@@ -3,9 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use trayinit::{
-    CheckItem, Icon, MenuItem, RadioGroup, RadioItem, StandardItem, Tray, TrayEvent, TrayMethods,
-};
+use trayinit::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
+use trayinit::{Icon, Tray, TrayEvent, TrayMethods};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Message {
@@ -106,7 +105,7 @@ impl Tray for ShowcaseTray {
                 visible: true,
             }
             .into(),
-            MenuItem::Submenu(trayinit::Submenu::new(
+            MenuItem::Submenu(Submenu::new(
                 "Session",
                 vec![
                     StandardItem::new("Reset tick counter", Message::ResetTicks).into(),

@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use trayinit::{CheckItem, Handle, MenuItem, StandardItem, Tray, TrayEvent, TrayMethods};
+use trayinit::menu::{CheckItem, MenuItem, StandardItem};
+use trayinit::{Handle, Tray, TrayEvent, TrayMethods};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};

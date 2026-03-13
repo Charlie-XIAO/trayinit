@@ -13,16 +13,16 @@ use crate::{Error, Icon};
 
 /// Owned `HICON` created from the crate's public RGBA icon.
 #[derive(Debug)]
-pub(crate) struct OwnedIcon {
+pub struct OwnedIcon {
     handle: HICON,
 }
 
 impl OwnedIcon {
-    pub(crate) fn handle(&self) -> HICON {
+    pub fn handle(&self) -> HICON {
         self.handle
     }
 
-    pub(crate) fn from_icon(icon: &Icon) -> Result<Self, Error> {
+    pub fn from_icon(icon: &Icon) -> Result<Self, Error> {
         // Reference:
         // tray-icon/src/platform_impl/windows/icon.rs::RgbaIcon::into_windows_icon
         // and muda/src/platform_impl/windows/icon.rs::RgbaIcon::into_windows_icon.
@@ -65,16 +65,16 @@ impl Drop for OwnedIcon {
 
 /// Owned menu bitmap derived from an icon.
 #[derive(Debug)]
-pub(crate) struct OwnedBitmap {
+pub struct OwnedBitmap {
     handle: HBITMAP,
 }
 
 impl OwnedBitmap {
-    pub(crate) fn handle(&self) -> HBITMAP {
+    pub fn handle(&self) -> HBITMAP {
         self.handle
     }
 
-    pub(crate) fn from_icon(icon: &Icon) -> Result<Self, Error> {
+    pub fn from_icon(icon: &Icon) -> Result<Self, Error> {
         // Reference: muda/src/platform_impl/windows/icon.rs::WinIcon::to_hbitmap.
         let icon = OwnedIcon::from_icon(icon)?;
         let hdc = unsafe { CreateCompatibleDC(ptr::null_mut()) };

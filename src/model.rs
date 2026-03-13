@@ -1,11 +1,9 @@
-use crate::{
-    Icon,
-    menu::{Accelerator, MenuItem},
-    tray::{Tray, TrayStatus},
-};
+use crate::Icon;
+use crate::menu::{Accelerator, MenuItem};
+use crate::tray::{Tray, TrayStatus};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NormalizedTrayView<Message> {
+pub struct NormalizedTrayView<Message> {
     pub icon: Option<Icon>,
     pub title: Option<String>,
     pub tooltip: Option<String>,
@@ -16,7 +14,7 @@ pub(crate) struct NormalizedTrayView<Message> {
 }
 
 impl<Message: Clone + Eq> NormalizedTrayView<Message> {
-    pub(crate) fn from_tray<T: Tray<Message = Message>>(tray: &T) -> Self {
+    pub fn from_tray<T: Tray<Message = Message>>(tray: &T) -> Self {
         Self {
             icon: tray.icon(),
             title: tray.title(),
@@ -30,14 +28,14 @@ impl<Message: Clone + Eq> NormalizedTrayView<Message> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum MenuDiff<Message> {
+pub enum MenuDiff<Message> {
     None,
     Patch(Vec<MenuPatch<Message>>),
     Rebuild,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum MenuPatch<Message> {
+pub enum MenuPatch<Message> {
     Command {
         path: MenuPath,
         item: NormalizedCommandItem<Message>,
@@ -49,20 +47,20 @@ pub(crate) enum MenuPatch<Message> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct MenuPath(Vec<usize>);
+pub struct MenuPath(Vec<usize>);
 
 impl MenuPath {
-    pub(crate) fn new(segments: Vec<usize>) -> Self {
+    pub fn new(segments: Vec<usize>) -> Self {
         Self(segments)
     }
 
-    pub(crate) fn as_slice(&self) -> &[usize] {
+    pub fn as_slice(&self) -> &[usize] {
         &self.0
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum NormalizedMenuItem<Message> {
+pub enum NormalizedMenuItem<Message> {
     Standard(NormalizedCommandItem<Message>),
     Check(NormalizedCommandItem<Message>),
     Radio(NormalizedCommandItem<Message>),
@@ -71,7 +69,7 @@ pub(crate) enum NormalizedMenuItem<Message> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NormalizedCommandItem<Message> {
+pub struct NormalizedCommandItem<Message> {
     pub message: Message,
     pub label: String,
     pub enabled: bool,
@@ -81,14 +79,14 @@ pub(crate) struct NormalizedCommandItem<Message> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum CommandState {
+pub enum CommandState {
     Standard,
     Check { checked: bool },
     Radio { selected: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NormalizedSubmenu<Message> {
+pub struct NormalizedSubmenu<Message> {
     pub label: String,
     pub enabled: bool,
     pub icon: Option<Icon>,
@@ -158,7 +156,7 @@ fn normalize_menu_items<Message: Clone + Eq>(
     normalized
 }
 
-pub(crate) fn diff_menu_items<Message: Clone + Eq>(
+pub fn diff_menu_items<Message: Clone + Eq>(
     old: &[NormalizedMenuItem<Message>],
     new: &[NormalizedMenuItem<Message>],
 ) -> MenuDiff<Message> {
@@ -237,10 +235,8 @@ fn collect_menu_patches<Message: Clone + Eq>(
 #[cfg(test)]
 mod tests {
     use super::{CommandState, MenuDiff, NormalizedMenuItem, NormalizedTrayView, diff_menu_items};
-    use crate::{
-        Icon, Tray, TrayEvent, TrayStatus,
-        menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu},
-    };
+    use crate::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
+    use crate::{Icon, Tray, TrayEvent, TrayStatus};
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     enum Message {

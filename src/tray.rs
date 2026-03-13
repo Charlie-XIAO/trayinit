@@ -2,7 +2,9 @@ use core::hash::Hash;
 
 use dpi::{PhysicalPosition, PhysicalSize};
 
-use crate::{ClosedError, Error, Icon, Result, menu::MenuItem, platform};
+use crate::menu::MenuItem;
+use crate::platform::{self, PlatformHandle};
+use crate::{ClosedError, Error, Icon, Result};
 
 /// User-defined tray state.
 pub trait Tray: Sized + Send + 'static {
@@ -228,14 +230,11 @@ impl Default for LinuxOptions {
 #[derive(Debug, Clone)]
 pub struct Handle<T: Tray> {
     tray_id: String,
-    inner: crate::platform::PlatformHandle<T>,
+    inner: PlatformHandle<T>,
 }
 
 impl<T: Tray> Handle<T> {
-    pub(crate) fn new(
-        tray_id: impl Into<String>,
-        inner: crate::platform::PlatformHandle<T>,
-    ) -> Self {
+    pub(crate) fn new(tray_id: impl Into<String>, inner: PlatformHandle<T>) -> Self {
         Self {
             tray_id: tray_id.into(),
             inner,

@@ -1,42 +1,35 @@
 use std::collections::HashMap;
 use std::ptr;
 
-use windows_sys::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, POINT, TRUE, WPARAM},
-    UI::{
-        Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
-        WindowsAndMessaging::{
-            AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED,
-            MF_DISABLED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MFS_CHECKED,
-            MFS_DISABLED, MFS_ENABLED, MFS_UNCHECKED, MIIM_BITMAP, MIIM_STATE, MIIM_STRING,
-            SetForegroundWindow, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
-            TrackPopupMenu, WM_NCACTIVATE, WM_NCPAINT,
-        },
-    },
-};
-
-use crate::{
-    menu::Accelerator,
-    model::{
-        CommandState, MenuPatch, NormalizedCommandItem, NormalizedMenuItem, NormalizedSubmenu,
-    },
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, TRUE, WPARAM};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED, MF_DISABLED,
+    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MFS_CHECKED, MFS_DISABLED,
+    MFS_ENABLED, MFS_UNCHECKED, MIIM_BITMAP, MIIM_STATE, MIIM_STRING, SetForegroundWindow,
+    SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TrackPopupMenu, WM_NCACTIVATE,
+    WM_NCPAINT,
 };
 
 use super::dark_menu_bar;
 use super::icon::OwnedBitmap;
 use super::util::encode_wide;
+use crate::menu::Accelerator;
+use crate::model::{
+    CommandState, MenuPatch, NormalizedCommandItem, NormalizedMenuItem, NormalizedSubmenu,
+};
 
 const MENU_SUBCLASS_ID: usize = 200;
 
 #[derive(Debug)]
-pub(crate) struct RenderedMenu<Message> {
+pub struct RenderedMenu<Message> {
     root: HMENU,
     items: Vec<NativeMenuItem>,
     command_map: HashMap<u32, Message>,
 }
 
 impl<Message: Clone + Eq> RenderedMenu<Message> {
-    pub(crate) fn from_model(items: &[NormalizedMenuItem<Message>]) -> Option<Self> {
+    pub fn from_model(items: &[NormalizedMenuItem<Message>]) -> Option<Self> {
         let root = unsafe { CreatePopupMenu() };
         if root.is_null() {
             return None;
@@ -62,15 +55,15 @@ impl<Message: Clone + Eq> RenderedMenu<Message> {
         }
     }
 
-    pub(crate) fn handle(&self) -> HMENU {
+    pub fn handle(&self) -> HMENU {
         self.root
     }
 
-    pub(crate) fn resolve(&self, command: u32) -> Option<Message> {
+    pub fn resolve(&self, command: u32) -> Option<Message> {
         self.command_map.get(&command).cloned()
     }
 
-    pub(crate) fn apply_patches(&mut self, patches: &[MenuPatch<Message>]) -> bool {
+    pub fn apply_patches(&mut self, patches: &[MenuPatch<Message>]) -> bool {
         for patch in patches {
             let ok = match patch {
                 MenuPatch::Command { path, item } => {
@@ -388,7 +381,7 @@ fn set_menu_bitmap_by_position(parent: HMENU, position: u32, bitmap: Option<&Own
     }
 }
 
-pub(crate) fn show_popup_menu(hwnd: HWND, menu: HMENU) -> Option<u32> {
+pub fn show_popup_menu(hwnd: HWND, menu: HMENU) -> Option<u32> {
     // Reference: muda/src/platform_impl/windows/mod.rs::show_context_menu.
     let mut point = POINT { x: 0, y: 0 };
     unsafe {
@@ -407,7 +400,7 @@ pub(crate) fn show_popup_menu(hwnd: HWND, menu: HMENU) -> Option<u32> {
     }
 }
 
-pub(crate) fn attach_window_subclass(hwnd: HWND) {
+pub fn attach_window_subclass(hwnd: HWND) {
     unsafe {
         // Reference:
         // muda/src/platform_impl/windows/mod.rs::attach_menu_subclass_for_hwnd.
@@ -415,7 +408,7 @@ pub(crate) fn attach_window_subclass(hwnd: HWND) {
     }
 }
 
-pub(crate) fn detach_window_subclass(hwnd: HWND) {
+pub fn detach_window_subclass(hwnd: HWND) {
     if hwnd.is_null() {
         return;
     }
