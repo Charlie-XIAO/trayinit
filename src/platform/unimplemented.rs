@@ -36,7 +36,7 @@ pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
     Err(Error::NotImplemented)
 }
 
-pub fn run<T: crate::Tray>(builder: Builder<T>) -> Result<()> {
+pub fn run<T: Tray>(builder: Builder<T>) -> Result<()> {
     let _ = builder;
     Err(Error::NotImplemented)
 }

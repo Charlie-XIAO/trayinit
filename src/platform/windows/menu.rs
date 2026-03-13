@@ -14,6 +14,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use super::dark_menu_bar;
 use super::icon::OwnedBitmap;
 use super::util::encode_wide;
+use crate::Icon;
 use crate::menu::Accelerator;
 use crate::model::{
     CommandState, MenuPatch, NormalizedCommandItem, NormalizedMenuItem, NormalizedSubmenu,
@@ -361,7 +362,7 @@ fn command_state(state: CommandState, enabled: bool) -> u32 {
     flags
 }
 
-fn bitmap_from_icon(icon: Option<&crate::Icon>) -> Option<OwnedBitmap> {
+fn bitmap_from_icon(icon: Option<&Icon>) -> Option<OwnedBitmap> {
     let icon = icon?;
     OwnedBitmap::from_icon(icon).ok()
 }

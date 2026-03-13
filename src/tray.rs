@@ -88,9 +88,11 @@ pub trait TrayMethods: Tray + private::Sealed {
 impl<T: Tray> TrayMethods for T {}
 
 mod private {
+    use crate::Tray;
+
     pub trait Sealed {}
 
-    impl<T: crate::Tray> Sealed for T {}
+    impl<T: Tray> Sealed for T {}
 }
 
 /// High-level tray visibility/importance hint.

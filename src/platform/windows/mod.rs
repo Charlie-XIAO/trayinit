@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use self::icon::OwnedIcon;
 use self::menu::RenderedMenu;
-use crate::model::{MenuDiff, NormalizedTrayView, diff_menu_items};
+use crate::model::{MenuDiff, NormalizedMenuItem, NormalizedTrayView, diff_menu_items};
 use crate::{
     ActivateEvent, Builder, ClosedError, Error, Handle, Result, RuntimePreference, Tray, TrayEvent,
 };
@@ -123,7 +123,7 @@ pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
     spawn(builder)
 }
 
-pub fn run<T: crate::Tray>(builder: Builder<T>) -> Result<()> {
+pub fn run<T: Tray>(builder: Builder<T>) -> Result<()> {
     // TODO: Implement this
     let _ = builder;
     Err(Error::NotImplemented)
@@ -561,7 +561,7 @@ struct NativeState<Id> {
     hwnd: HWND,
     internal_id: u32,
     view: Option<NormalizedTrayView<Id>>,
-    menu_view: Option<Vec<crate::model::NormalizedMenuItem<Id>>>,
+    menu_view: Option<Vec<NormalizedMenuItem<Id>>>,
     icon: Option<OwnedIcon>,
     menu: Option<RenderedMenu<Id>>,
     menu_is_open: bool,

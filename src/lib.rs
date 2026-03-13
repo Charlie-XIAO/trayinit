@@ -6,9 +6,10 @@ mod platform;
 mod tray;
 
 pub use dpi;
-pub use error::{ClosedError, Error, IconError, Result};
-pub use icon::Icon;
-pub use tray::{
+
+pub use crate::error::{ClosedError, Error, IconError, Result};
+pub use crate::icon::Icon;
+pub use crate::tray::{
     ActivateEvent, Builder, Handle, LinuxOptions, RuntimePreference, ScrollAxis, ScrollEvent, Tray,
     TrayEvent, TrayMethods, TrayStatus,
 };
