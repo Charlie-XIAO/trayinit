@@ -217,16 +217,18 @@ impl<Message: Clone> RenderedMenu<Message> {
                     | NormalizedMenuItem::Radio(item),
                 ) => {
                     command_map.insert(*command, item.message.clone());
-                    if let Some(accelerator) = item.accelerator.as_ref() {
-                        let command = u16::try_from(*command).map_err(|_| {
-                            Error::Unsupported(
-                                "too many menu items for the Windows accelerator table",
-                            )
-                        })?;
-                        accelerators.push(
-                            accelerator::to_accel(accelerator, command)
-                                .map_err(Error::Accelerator)?,
-                        );
+                    if item.enabled {
+                        if let Some(accelerator) = item.accelerator.as_ref() {
+                            let command = u16::try_from(*command).map_err(|_| {
+                                Error::Unsupported(
+                                    "too many menu items for the Windows accelerator table",
+                                )
+                            })?;
+                            accelerators.push(
+                                accelerator::to_accel(accelerator, command)
+                                    .map_err(Error::Accelerator)?,
+                            );
+                        }
                     }
                 },
                 (
@@ -446,6 +448,12 @@ impl<Message: Clone> MenuBuilder<Message> {
 
 fn label_with_accelerator(label: &str, accelerator: Option<&Accelerator>) -> String {
     match accelerator {
+        // Reference: Win32 menu shortcut text is conventionally appended after
+        // "\t". Microsoft documents "\a" as a more general right-align escape,
+        // but the shortcut-specific guidance uses "\t", and `muda` follows the
+        // same pattern:
+        // https://learn.microsoft.com/en-us/windows/win32/menurc/about-menus
+        // https://learn.microsoft.com/en-us/windows/win32/menurc/menuitem-statement
         Some(accelerator) => format!("{label}\t{}", AcceleratorLabel(accelerator)),
         None => label.to_string(),
     }
@@ -607,5 +615,27 @@ unsafe extern "system" fn menu_subclass_proc(
             result
         },
         _ => unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RenderedMenu;
+    use crate::menu::{Accelerator, Code, Modifiers};
+    use crate::model::{CommandState, NormalizedCommandItem, NormalizedMenuItem};
+
+    #[test]
+    fn disabled_items_do_not_bind_accelerators() {
+        let items = vec![NormalizedMenuItem::Standard(NormalizedCommandItem {
+            message: (),
+            label: "Quit".to_string(),
+            enabled: false,
+            icon: None,
+            accelerator: Some(Accelerator::new(Some(Modifiers::CONTROL), Code::KeyQ)),
+            state: CommandState::Standard,
+        })];
+
+        let rendered = RenderedMenu::from_model(&items).unwrap().unwrap();
+        assert!(rendered.accelerator_handle().is_null());
     }
 }

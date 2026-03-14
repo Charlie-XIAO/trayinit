@@ -10,6 +10,13 @@ pub fn to_accel(accelerator: &Accelerator, command: u16) -> Result<ACCEL, Accele
     // muda/src/platform_impl/windows/accelerator.rs::Accelerator::to_accel.
     let mut virt_key = FVIRTKEY;
     let modifiers = accelerator.modifiers();
+    let supported_modifiers = Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT;
+    let unsupported_modifiers = modifiers & !supported_modifiers;
+    if !unsupported_modifiers.is_empty() {
+        return Err(AcceleratorError::UnsupportedModifiers(
+            unsupported_modifiers,
+        ));
+    }
     if modifiers.contains(Modifiers::CONTROL) {
         virt_key |= FCONTROL;
     }
@@ -53,7 +60,7 @@ pub fn fmt_label(accelerator: &Accelerator, f: &mut fmt::Formatter<'_>) -> fmt::
         write!(f, "Alt+")?;
     }
     if modifiers.contains(Modifiers::SUPER) {
-        write!(f, "Windows+")?;
+        write!(f, "Win+")?;
     }
 
     match accelerator.key() {
@@ -235,4 +242,33 @@ fn key_to_vk(key: Code) -> Result<VIRTUAL_KEY, AcceleratorError> {
         Code::Convert => VK_CONVERT,
         _ => return Err(AcceleratorError::UnsupportedKey(key)),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_accel;
+    use crate::menu::{Accelerator, AcceleratorError, Code, Modifiers};
+
+    #[test]
+    fn rejects_super_modifier() {
+        let accelerator = Accelerator::new(Some(Modifiers::SUPER), Code::KeyQ);
+
+        let error = to_accel(&accelerator, 1).err().unwrap();
+        assert!(matches!(
+            error,
+            AcceleratorError::UnsupportedModifiers(modifiers)
+                if modifiers == Modifiers::SUPER
+        ));
+    }
+
+    #[test]
+    fn accepts_supported_modifiers() {
+        let accelerator = Accelerator::new(
+            Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT),
+            Code::KeyQ,
+        );
+
+        let accel = to_accel(&accelerator, 1).unwrap();
+        assert_eq!(accel.cmd, 1);
+    }
 }

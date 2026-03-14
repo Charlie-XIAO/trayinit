@@ -166,9 +166,9 @@ impl<Message> RadioGroup<Message> {
     }
 
     pub fn with_selected(mut self, index: usize) -> Self {
-        debug_assert!(
+        assert!(
             index < self.options.len(),
-            "radio selection index {index} is out of range for {} options",
+            "Radio selection index {index} is out of range for {} options",
             self.options.len()
         );
         self.selected = Some(index);
@@ -267,7 +267,15 @@ impl<Message> Submenu<Message> {
     }
 }
 
-/// A keyboard accelerator.
+/// A menu keyboard accelerator.
+///
+/// Platform notes:
+/// - macOS: maps naturally to native menu key equivalents.
+/// - Linux: exported as menu shortcut metadata; actual host behavior is
+///   desktop-dependent.
+/// - Windows tray popups: the shortcut text is displayed in the menu, but
+///   activation requires a real registered host window to supply keyboard
+///   messages. Unsupported modifiers such as `SUPER` are rejected on Windows.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Accelerator {
     modifiers: Modifiers,
@@ -327,6 +335,8 @@ pub const CMD_OR_CTRL: Modifiers = Modifiers::CONTROL;
 pub enum AcceleratorError {
     #[error("unsupported accelerator key on this platform: {0:?}")]
     UnsupportedKey(Code),
+    #[error("unsupported accelerator modifiers on this platform: {0:?}")]
+    UnsupportedModifiers(Modifiers),
 }
 
 fn write_display_code(f: &mut fmt::Formatter<'_>, code: Code) -> fmt::Result {

@@ -26,6 +26,11 @@ pub mod windows {
     /// This is intended for host-integrated Windows runtimes such as `attach()`
     /// with `winit`'s `with_msg_hook(...)`, after at least one host window has
     /// been registered with [`register_accelerator_window`].
+    ///
+    /// The tray's own hidden helper window is not a meaningful keyboard-focus
+    /// target. In practice, Windows tray accelerators only work when the app
+    /// has a real focusable host window whose incoming messages are passed
+    /// here.
     pub unsafe fn process_message<T: Tray>(handle: &Handle<T>, msg: *const MSG) -> bool {
         unsafe { handle.process_windows_message(msg) }
     }
@@ -35,6 +40,10 @@ pub mod windows {
     /// The tray itself still uses its hidden helper window internally. This
     /// registration only tells the accelerator hook which incoming host-window
     /// messages are allowed to drive the tray's accelerator table.
+    ///
+    /// This mirrors the Win32 model used by menu libraries such as `muda`:
+    /// accelerator translation is tied to a real application window, not the
+    /// tray's hidden notification-area helper window.
     ///
     /// # Safety
     ///
