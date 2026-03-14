@@ -290,6 +290,30 @@ impl<T: Tray> Handle<T> {
     pub fn is_closed(&self) -> bool {
         self.inner.is_closed()
     }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) unsafe fn process_windows_message(
+        &self,
+        msg: *const windows_sys::Win32::UI::WindowsAndMessaging::MSG,
+    ) -> bool {
+        unsafe { self.inner.process_windows_message(msg) }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) unsafe fn register_accelerator_window(
+        &self,
+        hwnd: windows_sys::Win32::Foundation::HWND,
+    ) -> core::result::Result<(), ClosedError> {
+        unsafe { self.inner.register_accelerator_window(hwnd) }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) unsafe fn unregister_accelerator_window(
+        &self,
+        hwnd: windows_sys::Win32::Foundation::HWND,
+    ) -> core::result::Result<(), ClosedError> {
+        unsafe { self.inner.unregister_accelerator_window(hwnd) }
+    }
 }
 
 impl From<ClosedError> for Error {

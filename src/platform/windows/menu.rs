@@ -1,24 +1,25 @@
 use std::collections::HashMap;
-use std::ptr;
+use std::{fmt, io, ptr};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, TRUE, WPARAM};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED, MF_DISABLED,
-    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MFS_CHECKED, MFS_DISABLED,
-    MFS_ENABLED, MFS_UNCHECKED, MFT_RADIOCHECK, MIIM_BITMAP, MIIM_FTYPE, MIIM_STATE, MIIM_STRING,
-    SetForegroundWindow, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
-    TrackPopupMenu, WM_NCACTIVATE, WM_NCPAINT,
+    ACCEL, AppendMenuW, CreateAcceleratorTableW, CreatePopupMenu, DestroyAcceleratorTable,
+    DestroyMenu, HACCEL, HMENU, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_POPUP,
+    MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MFS_CHECKED, MFS_DISABLED, MFS_ENABLED, MFS_UNCHECKED,
+    MFT_RADIOCHECK, MIIM_BITMAP, MIIM_FTYPE, MIIM_STATE, MIIM_STRING, MSG, SetForegroundWindow,
+    SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TrackPopupMenu,
+    TranslateAcceleratorW, WM_NCACTIVATE, WM_NCPAINT,
 };
 
-use super::dark_menu_bar;
 use super::icon::OwnedBitmap;
 use super::util::encode_wide;
-use crate::Icon;
+use super::{accelerator, dark_menu_bar};
 use crate::menu::Accelerator;
 use crate::model::{
     CommandState, MenuPatch, NormalizedCommandItem, NormalizedMenuItem, NormalizedSubmenu,
 };
+use crate::{Error, Icon, Result};
 
 const MENU_SUBCLASS_ID: usize = 200;
 
@@ -27,37 +28,45 @@ pub struct RenderedMenu<Message> {
     root: HMENU,
     items: Vec<NativeMenuItem>,
     command_map: HashMap<u32, Message>,
+    accelerator_table: OwnedAcceleratorTable,
 }
 
 impl<Message: Clone> RenderedMenu<Message> {
-    pub fn from_model(items: &[NormalizedMenuItem<Message>]) -> Option<Self> {
+    pub fn from_model(model_items: &[NormalizedMenuItem<Message>]) -> Result<Option<Self>> {
         let root = unsafe { CreatePopupMenu() };
         if root.is_null() {
-            return None;
+            return Err(Error::Os(io::Error::last_os_error()));
         }
 
         let mut builder = MenuBuilder {
             next_command: 1,
             command_map: HashMap::new(),
         };
-        let items = builder.append_items(root, items);
+        let items = builder.append_items(root, model_items)?;
 
         if items.is_empty() {
             unsafe {
                 DestroyMenu(root);
             }
-            None
+            Ok(None)
         } else {
-            Some(Self {
+            let mut rendered = Self {
                 root,
                 items,
                 command_map: builder.command_map,
-            })
+                accelerator_table: OwnedAcceleratorTable::new(),
+            };
+            rendered.sync_bindings(model_items)?;
+            Ok(Some(rendered))
         }
     }
 
     pub fn handle(&self) -> HMENU {
         self.root
+    }
+
+    pub fn accelerator_handle(&self) -> HACCEL {
+        self.accelerator_table.handle()
     }
 
     pub fn resolve(&self, command: u32) -> Option<Message> {
@@ -83,14 +92,16 @@ impl<Message: Clone> RenderedMenu<Message> {
         true
     }
 
-    pub fn sync_messages(&mut self, items: &[NormalizedMenuItem<Message>]) -> bool {
+    pub fn sync_bindings(&mut self, items: &[NormalizedMenuItem<Message>]) -> Result<bool> {
         let mut command_map = HashMap::new();
-        if !Self::collect_command_map(&self.items, items, &mut command_map) {
-            return false;
+        let mut accelerators = Vec::new();
+        if !Self::collect_bindings(&self.items, items, &mut command_map, &mut accelerators)? {
+            return Ok(false);
         }
 
         self.command_map = command_map;
-        true
+        self.accelerator_table.replace(&accelerators)?;
+        Ok(true)
     }
 
     fn apply_command_patch(
@@ -186,13 +197,14 @@ impl<Message: Clone> RenderedMenu<Message> {
         }
     }
 
-    fn collect_command_map(
+    fn collect_bindings(
         nodes: &[NativeMenuItem],
         items: &[NormalizedMenuItem<Message>],
         command_map: &mut HashMap<u32, Message>,
-    ) -> bool {
+        accelerators: &mut Vec<ACCEL>,
+    ) -> Result<bool> {
         if nodes.len() != items.len() {
-            return false;
+            return Ok(false);
         }
 
         for (node, item) in nodes.iter().zip(items) {
@@ -205,20 +217,36 @@ impl<Message: Clone> RenderedMenu<Message> {
                     | NormalizedMenuItem::Radio(item),
                 ) => {
                     command_map.insert(*command, item.message.clone());
+                    if let Some(accelerator) = item.accelerator.as_ref() {
+                        let command = u16::try_from(*command).map_err(|_| {
+                            Error::Unsupported(
+                                "too many menu items for the Windows accelerator table",
+                            )
+                        })?;
+                        accelerators.push(
+                            accelerator::to_accel(accelerator, command)
+                                .map_err(Error::Accelerator)?,
+                        );
+                    }
                 },
                 (
                     NativeMenuItemKind::Submenu { children, .. },
                     NormalizedMenuItem::Submenu(submenu),
                 ) => {
-                    if !Self::collect_command_map(children, &submenu.children, command_map) {
-                        return false;
+                    if !Self::collect_bindings(
+                        children,
+                        &submenu.children,
+                        command_map,
+                        accelerators,
+                    )? {
+                        return Ok(false);
                     }
                 },
-                _ => return false,
+                _ => return Ok(false),
             }
         }
 
-        true
+        Ok(true)
     }
 }
 
@@ -226,6 +254,56 @@ impl<Message> Drop for RenderedMenu<Message> {
     fn drop(&mut self) {
         unsafe {
             DestroyMenu(self.root);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct OwnedAcceleratorTable {
+    handle: HACCEL,
+}
+
+impl OwnedAcceleratorTable {
+    fn new() -> Self {
+        Self {
+            handle: ptr::null_mut(),
+        }
+    }
+
+    fn handle(&self) -> HACCEL {
+        self.handle
+    }
+
+    fn replace(&mut self, accelerators: &[ACCEL]) -> Result<()> {
+        let new_handle = if accelerators.is_empty() {
+            ptr::null_mut()
+        } else {
+            let handle = unsafe {
+                CreateAcceleratorTableW(accelerators.as_ptr(), accelerators.len() as i32)
+            };
+            if handle.is_null() {
+                return Err(Error::Os(io::Error::last_os_error()));
+            }
+            handle
+        };
+
+        if !self.handle.is_null() {
+            unsafe {
+                DestroyAcceleratorTable(self.handle);
+            }
+        }
+
+        self.handle = new_handle;
+        Ok(())
+    }
+}
+
+impl Drop for OwnedAcceleratorTable {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe {
+                DestroyAcceleratorTable(self.handle);
+            }
         }
     }
 }
@@ -259,16 +337,16 @@ impl<Message: Clone> MenuBuilder<Message> {
         &mut self,
         parent: HMENU,
         items: &[NormalizedMenuItem<Message>],
-    ) -> Vec<NativeMenuItem> {
+    ) -> Result<Vec<NativeMenuItem>> {
         let mut rendered = Vec::with_capacity(items.len());
 
         for item in items {
-            if let Some(rendered_item) = self.append_item(parent, rendered.len() as u32, item) {
+            if let Some(rendered_item) = self.append_item(parent, rendered.len() as u32, item)? {
                 rendered.push(rendered_item);
             }
         }
 
-        rendered
+        Ok(rendered)
     }
 
     fn append_item(
@@ -276,16 +354,16 @@ impl<Message: Clone> MenuBuilder<Message> {
         parent: HMENU,
         position: u32,
         item: &NormalizedMenuItem<Message>,
-    ) -> Option<NativeMenuItem> {
+    ) -> Result<Option<NativeMenuItem>> {
         match item {
             NormalizedMenuItem::Separator => {
                 unsafe {
                     AppendMenuW(parent, MF_SEPARATOR, 0, ptr::null());
                 }
-                Some(NativeMenuItem {
+                Ok(Some(NativeMenuItem {
                     bitmap: None,
                     kind: NativeMenuItemKind::Separator,
-                })
+                }))
             },
             NormalizedMenuItem::Standard(item)
             | NormalizedMenuItem::Check(item)
@@ -299,7 +377,7 @@ impl<Message: Clone> MenuBuilder<Message> {
         parent: HMENU,
         position: u32,
         item: &NormalizedCommandItem<Message>,
-    ) -> Option<NativeMenuItem> {
+    ) -> Result<Option<NativeMenuItem>> {
         let command = self.next_command();
         let text = encode_wide(label_with_accelerator(
             &item.label,
@@ -319,10 +397,10 @@ impl<Message: Clone> MenuBuilder<Message> {
         set_menu_bitmap_by_position(parent, position, bitmap.as_ref());
         self.command_map.insert(command, item.message.clone());
 
-        Some(NativeMenuItem {
+        Ok(Some(NativeMenuItem {
             bitmap,
             kind: NativeMenuItemKind::Command { command },
-        })
+        }))
     }
 
     fn append_submenu(
@@ -330,13 +408,13 @@ impl<Message: Clone> MenuBuilder<Message> {
         parent: HMENU,
         position: u32,
         submenu: &NormalizedSubmenu<Message>,
-    ) -> Option<NativeMenuItem> {
+    ) -> Result<Option<NativeMenuItem>> {
         let popup = unsafe { CreatePopupMenu() };
         if popup.is_null() {
-            return None;
+            return Err(Error::Os(io::Error::last_os_error()));
         }
 
-        let children = self.append_items(popup, &submenu.children);
+        let children = self.append_items(popup, &submenu.children)?;
         let text = encode_wide(submenu.label.as_str());
         let mut flags = MF_POPUP;
         if !submenu.enabled {
@@ -350,13 +428,13 @@ impl<Message: Clone> MenuBuilder<Message> {
         let bitmap = bitmap_from_icon(submenu.icon.as_ref());
         set_menu_bitmap_by_position(parent, position, bitmap.as_ref());
 
-        Some(NativeMenuItem {
+        Ok(Some(NativeMenuItem {
             bitmap,
             kind: NativeMenuItemKind::Submenu {
                 menu: popup,
                 children,
             },
-        })
+        }))
     }
 
     fn next_command(&mut self) -> u32 {
@@ -368,8 +446,16 @@ impl<Message: Clone> MenuBuilder<Message> {
 
 fn label_with_accelerator(label: &str, accelerator: Option<&Accelerator>) -> String {
     match accelerator {
-        Some(accelerator) => format!("{label}\t{accelerator}"),
+        Some(accelerator) => format!("{label}\t{}", AcceleratorLabel(accelerator)),
         None => label.to_string(),
+    }
+}
+
+struct AcceleratorLabel<'a>(&'a Accelerator);
+
+impl fmt::Display for AcceleratorLabel<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        accelerator::fmt_label(self.0, f)
     }
 }
 
@@ -483,6 +569,16 @@ pub fn detach_window_subclass(hwnd: HWND) {
     unsafe {
         RemoveWindowSubclass(hwnd, Some(menu_subclass_proc), MENU_SUBCLASS_ID);
     }
+}
+
+pub unsafe fn process_accelerator_message(hwnd: HWND, haccel: HACCEL, msg: *const MSG) -> bool {
+    if hwnd.is_null() || haccel.is_null() || msg.is_null() {
+        return false;
+    }
+
+    // Reference: muda/examples/winit.rs and Menu::init_for_hwnd docs, which run
+    // TranslateAcceleratorW from the host loop for Windows accelerators.
+    unsafe { TranslateAcceleratorW(hwnd, haccel, &*msg) == 1 }
 }
 
 unsafe extern "system" fn menu_subclass_proc(

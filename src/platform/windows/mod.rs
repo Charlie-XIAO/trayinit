@@ -1,3 +1,4 @@
+mod accelerator;
 mod dark_menu_bar;
 mod icon;
 mod menu;
@@ -17,7 +18,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CW_USEDEFAULT, ChangeWindowMessageFilterEx, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, GWL_USERDATA, GetCursorPos, GetMessageW, MSG, MSGFLT_ALLOW,
     PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageA, TranslateMessage,
-    WM_CLOSE, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_NCCREATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
     WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
     WS_OVERLAPPED,
@@ -81,6 +82,21 @@ impl<T: Tray> PlatformHandle<T> {
 
     pub fn is_closed(&self) -> bool {
         self.shared.closed.load(Ordering::Acquire)
+    }
+
+    pub unsafe fn process_windows_message(
+        &self,
+        msg: *const windows_sys::Win32::UI::WindowsAndMessaging::MSG,
+    ) -> bool {
+        self.shared.process_windows_message(msg)
+    }
+
+    pub unsafe fn register_accelerator_window(&self, hwnd: HWND) -> Result<(), ClosedError> {
+        self.shared.register_accelerator_window(hwnd)
+    }
+
+    pub unsafe fn unregister_accelerator_window(&self, hwnd: HWND) -> Result<(), ClosedError> {
+        self.shared.unregister_accelerator_window(hwnd)
     }
 }
 
@@ -165,10 +181,10 @@ fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Res
 where
     T::Message: Clone,
 {
-    match initialize_backend(shared) {
+    match initialize_backend(Arc::clone(&shared)) {
         Ok(()) => {
             let _ = init_tx.send(Ok(()));
-            message_loop();
+            message_loop(&shared);
         },
         Err(error) => {
             let _ = init_tx.send(Err(error));
@@ -264,16 +280,22 @@ fn register_window_class(class_name: &[u16]) -> Result<()> {
     Ok(())
 }
 
-fn message_loop() {
+fn message_loop<T: Tray>(shared: &Shared<T>) {
     let mut message: MSG = unsafe { std::mem::zeroed() };
     loop {
         let result = unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) };
         match result {
             -1 => break,
             0 => break,
-            _ => unsafe {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
+            _ => {
+                if shared.process_windows_message(&message) {
+                    continue;
+                }
+
+                unsafe {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
             },
         }
     }
@@ -312,6 +334,10 @@ unsafe extern "system" fn window_proc(
             user_data.ops.on_tray_message(lparam);
             return 0;
         },
+        WM_COMMAND => {
+            user_data.ops.on_command((wparam as u32) & 0xffff);
+            return 0;
+        },
         WM_DESTROY => {
             user_data.ops.on_destroy();
             unsafe {
@@ -336,6 +362,7 @@ trait WindowOps: Send {
     fn on_refresh(&mut self);
     fn on_taskbar_created(&mut self);
     fn on_tray_message(&mut self, lparam: LPARAM);
+    fn on_command(&mut self, command: u32);
     fn on_destroy(&mut self);
 }
 
@@ -390,7 +417,7 @@ where
             if !matches!(menu_diff, MenuDiff::None) {
                 self.native.menu_refresh_pending = true;
             } else if let Some(menu) = self.native.menu.as_mut() {
-                if menu.sync_messages(&view.menu) {
+                if menu.sync_bindings(&view.menu)? {
                     self.native.menu_view = Some(view.menu.clone());
                 } else {
                     self.native.menu_refresh_pending = true;
@@ -402,7 +429,7 @@ where
             self.native.menu_refresh_pending = false;
             match &menu_diff {
                 MenuDiff::Rebuild => {
-                    self.native.menu = RenderedMenu::from_model(&view.menu);
+                    self.native.menu = RenderedMenu::from_model(&view.menu)?;
                 },
                 MenuDiff::None => {},
                 MenuDiff::Patch(patches) => {
@@ -412,22 +439,24 @@ where
                     }
 
                     if !applied {
-                        self.native.menu = RenderedMenu::from_model(&view.menu);
+                        self.native.menu = RenderedMenu::from_model(&view.menu)?;
                     }
                 },
             }
 
             let sync_ok = match self.native.menu.as_mut() {
-                Some(menu) => menu.sync_messages(&view.menu),
+                Some(menu) => menu.sync_bindings(&view.menu)?,
                 None => view.menu.is_empty(),
             };
 
             if !sync_ok {
-                self.native.menu = RenderedMenu::from_model(&view.menu);
+                self.native.menu = RenderedMenu::from_model(&view.menu)?;
             }
 
             self.native.menu_view = Some(view.menu.clone());
         }
+
+        self.shared.set_haccel(self.native.accelerator_handle());
 
         self.native.visible = view.visible;
         self.native.view = Some(view);
@@ -565,17 +594,33 @@ where
         }
     }
 
+    fn on_command(&mut self, command: u32) {
+        let selected_id = self
+            .native
+            .menu
+            .as_ref()
+            .and_then(|menu| menu.resolve(command));
+
+        if let Some(id) = selected_id {
+            self.dispatch_event(TrayEvent::Menu(id));
+        }
+    }
+
     fn on_destroy(&mut self) {
         menu::detach_window_subclass(self.native.hwnd);
         self.native.remove_tray_icon();
         self.shared.closed.store(true, Ordering::Release);
         self.shared.hwnd.store(0, Ordering::Release);
+        self.shared.set_haccel(ptr::null_mut());
+        self.shared.clear_accelerator_windows();
     }
 }
 
 struct Shared<T: Tray> {
     tray: Mutex<T>,
     hwnd: AtomicIsize,
+    haccel: AtomicIsize,
+    accelerator_windows: Mutex<Vec<isize>>,
     closed: AtomicBool,
 }
 
@@ -584,6 +629,8 @@ impl<T: Tray> Shared<T> {
         Self {
             tray: Mutex::new(tray),
             hwnd: AtomicIsize::new(0),
+            haccel: AtomicIsize::new(0),
+            accelerator_windows: Mutex::new(Vec::new()),
             closed: AtomicBool::new(false),
         }
     }
@@ -600,6 +647,50 @@ impl<T: Tray> Shared<T> {
         (hwnd != 0).then_some(hwnd as HWND)
     }
 
+    fn haccel(&self) -> Option<windows_sys::Win32::UI::WindowsAndMessaging::HACCEL> {
+        let haccel = self.haccel.load(Ordering::Acquire);
+        (haccel != 0).then_some(haccel as _)
+    }
+
+    fn set_haccel(&self, haccel: windows_sys::Win32::UI::WindowsAndMessaging::HACCEL) {
+        self.haccel.store(haccel as isize, Ordering::Release);
+    }
+
+    fn lock_accelerator_windows(&self) -> MutexGuard<'_, Vec<isize>> {
+        match self.accelerator_windows.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn register_accelerator_window(&self, hwnd: HWND) -> Result<(), ClosedError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(ClosedError);
+        }
+
+        let hwnd = hwnd as isize;
+        let mut windows = self.lock_accelerator_windows();
+        if !windows.contains(&hwnd) {
+            windows.push(hwnd);
+        }
+        Ok(())
+    }
+
+    fn unregister_accelerator_window(&self, hwnd: HWND) -> Result<(), ClosedError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(ClosedError);
+        }
+
+        let hwnd = hwnd as isize;
+        let mut windows = self.lock_accelerator_windows();
+        windows.retain(|registered| *registered != hwnd);
+        Ok(())
+    }
+
+    fn clear_accelerator_windows(&self) {
+        self.lock_accelerator_windows().clear();
+    }
+
     fn post_message(&self, msg: u32) -> Result<(), ClosedError> {
         let hwnd = self.hwnd().ok_or(ClosedError)?;
         if unsafe { PostMessageW(hwnd, msg, 0, 0) } == 0 {
@@ -614,6 +705,25 @@ impl<T: Tray> Shared<T> {
             return Err(ClosedError);
         }
         Ok(())
+    }
+
+    fn process_windows_message(&self, msg: *const MSG) -> bool {
+        let Some(tray_hwnd) = self.hwnd() else {
+            return false;
+        };
+        let Some(haccel) = self.haccel() else {
+            return false;
+        };
+        if msg.is_null() {
+            return false;
+        }
+
+        let source_hwnd = unsafe { (*msg).hwnd as isize };
+        if !self.lock_accelerator_windows().contains(&source_hwnd) {
+            return false;
+        }
+
+        unsafe { menu::process_accelerator_message(tray_hwnd, haccel, msg) }
     }
 }
 
@@ -636,7 +746,7 @@ struct NativeState<Id> {
 // thread.
 unsafe impl<Id> Send for NativeState<Id> {}
 
-impl<Id> NativeState<Id> {
+impl<Id: Clone> NativeState<Id> {
     fn new() -> Self {
         Self {
             hwnd: ptr::null_mut(),
@@ -672,6 +782,12 @@ impl<Id> NativeState<Id> {
             remove_tray_icon(self.hwnd, self.internal_id);
             self.registered = false;
         }
+    }
+
+    fn accelerator_handle(&self) -> windows_sys::Win32::UI::WindowsAndMessaging::HACCEL {
+        self.menu
+            .as_ref()
+            .map_or(ptr::null_mut(), RenderedMenu::accelerator_handle)
     }
 }
 

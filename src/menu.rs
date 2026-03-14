@@ -1,5 +1,7 @@
 use core::fmt;
 
+pub use keyboard_types::{Code, Modifiers};
+
 use crate::Icon;
 
 /// Declarative tray menu tree.
@@ -173,92 +175,151 @@ impl<Message> Submenu<Message> {
 /// A keyboard accelerator.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Accelerator {
-    pub modifiers: Modifiers,
-    pub key: Key,
+    modifiers: Modifiers,
+    key: Code,
 }
 
 impl Accelerator {
-    pub fn new(modifiers: Modifiers, key: Key) -> Self {
+    pub fn new(modifiers: Option<Modifiers>, key: Code) -> Self {
+        let mut modifiers = modifiers.unwrap_or_else(Modifiers::empty);
+        if modifiers.contains(Modifiers::META) {
+            modifiers.remove(Modifiers::META);
+            modifiers.insert(Modifiers::SUPER);
+        }
+
         Self { modifiers, key }
+    }
+
+    pub fn modifiers(&self) -> Modifiers {
+        self.modifiers
+    }
+
+    pub fn key(&self) -> Code {
+        self.key
+    }
+
+    pub fn matches(&self, modifiers: Modifiers, key: Code) -> bool {
+        let base_mods = Modifiers::SHIFT | Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER;
+        self.modifiers == modifiers & base_mods && self.key == key
     }
 }
 
 impl fmt::Display for Accelerator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.modifiers.control {
+        let modifiers = self.modifiers;
+        if modifiers.contains(Modifiers::CONTROL) {
             f.write_str("Ctrl+")?;
         }
-        if self.modifiers.alt {
+        if modifiers.contains(Modifiers::ALT) {
             f.write_str("Alt+")?;
         }
-        if self.modifiers.shift {
+        if modifiers.contains(Modifiers::SHIFT) {
             f.write_str("Shift+")?;
         }
-        if self.modifiers.super_key {
+        if modifiers.contains(Modifiers::SUPER) {
             f.write_str("Super+")?;
         }
-        write!(f, "{}", self.key)
+        write_display_code(f, self.key)
     }
 }
 
-/// Standard modifier set used by menu accelerators.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Modifiers {
-    pub control: bool,
-    pub alt: bool,
-    pub shift: bool,
-    pub super_key: bool,
+#[cfg(target_os = "macos")]
+pub const CMD_OR_CTRL: Modifiers = Modifiers::SUPER;
+#[cfg(not(target_os = "macos"))]
+pub const CMD_OR_CTRL: Modifiers = Modifiers::CONTROL;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AcceleratorError {
+    UnsupportedKey(Code),
 }
 
-impl Modifiers {
-    pub const fn new() -> Self {
-        Self {
-            control: false,
-            alt: false,
-            shift: false,
-            super_key: false,
-        }
-    }
-
-    pub const fn control(mut self) -> Self {
-        self.control = true;
-        self
-    }
-
-    pub const fn alt(mut self) -> Self {
-        self.alt = true;
-        self
-    }
-
-    pub const fn shift(mut self) -> Self {
-        self.shift = true;
-        self
-    }
-
-    pub const fn super_key(mut self) -> Self {
-        self.super_key = true;
-        self
-    }
-}
-
-/// A portable key identifier for accelerators.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Key {
-    Character(char),
-    Named(String),
-}
-
-impl Key {
-    pub fn named(value: impl Into<String>) -> Self {
-        Self::Named(value.into())
-    }
-}
-
-impl fmt::Display for Key {
+impl fmt::Display for AcceleratorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Key::Character(character) => write!(f, "{}", character.to_ascii_uppercase()),
-            Key::Named(value) => f.write_str(value),
+            AcceleratorError::UnsupportedKey(code) => {
+                write!(f, "unsupported accelerator key on this platform: {code:?}")
+            },
         }
+    }
+}
+
+impl std::error::Error for AcceleratorError {}
+
+fn write_display_code(f: &mut fmt::Formatter<'_>, code: Code) -> fmt::Result {
+    match code {
+        Code::KeyA => f.write_str("A"),
+        Code::KeyB => f.write_str("B"),
+        Code::KeyC => f.write_str("C"),
+        Code::KeyD => f.write_str("D"),
+        Code::KeyE => f.write_str("E"),
+        Code::KeyF => f.write_str("F"),
+        Code::KeyG => f.write_str("G"),
+        Code::KeyH => f.write_str("H"),
+        Code::KeyI => f.write_str("I"),
+        Code::KeyJ => f.write_str("J"),
+        Code::KeyK => f.write_str("K"),
+        Code::KeyL => f.write_str("L"),
+        Code::KeyM => f.write_str("M"),
+        Code::KeyN => f.write_str("N"),
+        Code::KeyO => f.write_str("O"),
+        Code::KeyP => f.write_str("P"),
+        Code::KeyQ => f.write_str("Q"),
+        Code::KeyR => f.write_str("R"),
+        Code::KeyS => f.write_str("S"),
+        Code::KeyT => f.write_str("T"),
+        Code::KeyU => f.write_str("U"),
+        Code::KeyV => f.write_str("V"),
+        Code::KeyW => f.write_str("W"),
+        Code::KeyX => f.write_str("X"),
+        Code::KeyY => f.write_str("Y"),
+        Code::KeyZ => f.write_str("Z"),
+        Code::Digit0 => f.write_str("0"),
+        Code::Digit1 => f.write_str("1"),
+        Code::Digit2 => f.write_str("2"),
+        Code::Digit3 => f.write_str("3"),
+        Code::Digit4 => f.write_str("4"),
+        Code::Digit5 => f.write_str("5"),
+        Code::Digit6 => f.write_str("6"),
+        Code::Digit7 => f.write_str("7"),
+        Code::Digit8 => f.write_str("8"),
+        Code::Digit9 => f.write_str("9"),
+        Code::Comma => f.write_str(","),
+        Code::Minus => f.write_str("-"),
+        Code::Period => f.write_str("."),
+        Code::Space => f.write_str("Space"),
+        Code::Equal => f.write_str("="),
+        Code::Semicolon => f.write_str(";"),
+        Code::Slash => f.write_str("/"),
+        Code::Backslash => f.write_str("\\"),
+        Code::Quote => f.write_str("'"),
+        Code::Backquote => f.write_str("`"),
+        Code::BracketLeft => f.write_str("["),
+        Code::BracketRight => f.write_str("]"),
+        Code::Tab => f.write_str("Tab"),
+        Code::Escape => f.write_str("Esc"),
+        Code::Delete => f.write_str("Del"),
+        Code::Insert => f.write_str("Ins"),
+        Code::PageUp => f.write_str("PgUp"),
+        Code::PageDown => f.write_str("PgDn"),
+        Code::ArrowLeft => f.write_str("Left"),
+        Code::ArrowRight => f.write_str("Right"),
+        Code::ArrowUp => f.write_str("Up"),
+        Code::ArrowDown => f.write_str("Down"),
+        Code::Enter => f.write_str("Enter"),
+        Code::Home => f.write_str("Home"),
+        Code::End => f.write_str("End"),
+        Code::F1 => f.write_str("F1"),
+        Code::F2 => f.write_str("F2"),
+        Code::F3 => f.write_str("F3"),
+        Code::F4 => f.write_str("F4"),
+        Code::F5 => f.write_str("F5"),
+        Code::F6 => f.write_str("F6"),
+        Code::F7 => f.write_str("F7"),
+        Code::F8 => f.write_str("F8"),
+        Code::F9 => f.write_str("F9"),
+        Code::F10 => f.write_str("F10"),
+        Code::F11 => f.write_str("F11"),
+        Code::F12 => f.write_str("F12"),
+        _ => write!(f, "{code:?}"),
     }
 }

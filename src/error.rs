@@ -1,5 +1,7 @@
 use core::fmt;
 
+use crate::menu::AcceleratorError;
+
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 /// Top-level tray API error.
@@ -12,6 +14,8 @@ pub enum Error {
     Closed,
     /// The request could not be performed on this platform or thread.
     Unsupported(&'static str),
+    /// A menu accelerator could not be represented on the native backend.
+    Accelerator(AcceleratorError),
     /// The platform backend failed to initialize or update native state.
     Os(std::io::Error),
     /// A backend thread exited before it could finish initialization.
@@ -24,6 +28,7 @@ impl fmt::Display for Error {
             Error::NotImplemented => f.write_str("tray backend is not implemented"),
             Error::Closed => f.write_str("tray handle is closed"),
             Error::Unsupported(message) => f.write_str(message),
+            Error::Accelerator(error) => write!(f, "accelerator error: {error}"),
             Error::Os(error) => write!(f, "operating system error: {error}"),
             Error::Initialization(message) => f.write_str(message),
         }
@@ -33,6 +38,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Error::Accelerator(error) => Some(error),
             Error::Os(error) => Some(error),
             _ => None,
         }
