@@ -163,7 +163,7 @@ where
 
     let tray_id = tray.id().to_string();
     let shared = Arc::new(Shared::new(tray));
-    initialize_backend::<T>(Arc::clone(&shared))?;
+    initialize_backend::<T>(Arc::clone(&shared), false)?;
 
     Ok(Handle::new(tray_id, PlatformHandle::new(shared)))
 }
@@ -181,7 +181,7 @@ fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Res
 where
     T::Message: Clone,
 {
-    match initialize_backend(Arc::clone(&shared)) {
+    match initialize_backend(Arc::clone(&shared), true) {
         Ok(()) => {
             let _ = init_tx.send(Ok(()));
             message_loop(&shared);
@@ -192,7 +192,7 @@ where
     }
 }
 
-fn initialize_backend<T: Tray>(shared: Arc<Shared<T>>) -> Result<()>
+fn initialize_backend<T: Tray>(shared: Arc<Shared<T>>, owns_message_loop: bool) -> Result<()>
 where
     T::Message: Clone,
 {
@@ -206,7 +206,10 @@ where
     register_window_class(&class_name)?;
 
     let user_data = Box::new(WindowUserData {
-        ops: Box::new(WindowState::<T>::new(Arc::clone(&shared))),
+        ops: Box::new(WindowState::<T>::new(
+            Arc::clone(&shared),
+            owns_message_loop,
+        )),
     });
     let user_data_ptr = Box::into_raw(user_data);
 
@@ -339,10 +342,12 @@ unsafe extern "system" fn window_proc(
             return 0;
         },
         WM_DESTROY => {
-            user_data.ops.on_destroy();
+            let should_post_quit = user_data.ops.on_destroy();
             unsafe {
                 drop(Box::from_raw(user_data_ptr));
-                PostQuitMessage(0);
+                if should_post_quit {
+                    PostQuitMessage(0);
+                }
             }
             return 0;
         },
@@ -363,7 +368,7 @@ trait WindowOps: Send {
     fn on_taskbar_created(&mut self);
     fn on_tray_message(&mut self, lparam: LPARAM);
     fn on_command(&mut self, command: u32);
-    fn on_destroy(&mut self);
+    fn on_destroy(&mut self) -> bool;
 }
 
 struct WindowUserData {
@@ -373,16 +378,18 @@ struct WindowUserData {
 struct WindowState<T: Tray> {
     shared: Arc<Shared<T>>,
     native: NativeState<T::Message>,
+    owns_message_loop: bool,
 }
 
 impl<T: Tray> WindowState<T>
 where
     T::Message: Clone,
 {
-    fn new(shared: Arc<Shared<T>>) -> Self {
+    fn new(shared: Arc<Shared<T>>, owns_message_loop: bool) -> Self {
         Self {
             shared,
             native: NativeState::new(),
+            owns_message_loop,
         }
     }
 
@@ -606,13 +613,14 @@ where
         }
     }
 
-    fn on_destroy(&mut self) {
+    fn on_destroy(&mut self) -> bool {
         menu::detach_window_subclass(self.native.hwnd);
         self.native.remove_tray_icon();
         self.shared.closed.store(true, Ordering::Release);
         self.shared.hwnd.store(0, Ordering::Release);
         self.shared.set_haccel(ptr::null_mut());
         self.shared.clear_accelerator_windows();
+        self.owns_message_loop
     }
 }
 

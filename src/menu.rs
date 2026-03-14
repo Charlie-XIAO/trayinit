@@ -72,6 +72,26 @@ impl<Message> StandardItem<Message> {
             accelerator: None,
         }
     }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn with_visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
+        self
+    }
+
+    pub fn with_icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    pub fn with_accelerator(mut self, accelerator: Accelerator) -> Self {
+        self.accelerator = Some(accelerator);
+        self
+    }
 }
 
 /// A checkable menu item.
@@ -98,6 +118,31 @@ impl<Message> CheckItem<Message> {
             accelerator: None,
         }
     }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn with_visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
+        self
+    }
+
+    pub fn with_checked(mut self, checked: bool) -> Self {
+        self.checked = checked;
+        self
+    }
+
+    pub fn with_icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    pub fn with_accelerator(mut self, accelerator: Accelerator) -> Self {
+        self.accelerator = Some(accelerator);
+        self
+    }
 }
 
 /// A radio item group.
@@ -121,7 +166,22 @@ impl<Message> RadioGroup<Message> {
     }
 
     pub fn with_selected(mut self, index: usize) -> Self {
+        debug_assert!(
+            index < self.options.len(),
+            "radio selection index {index} is out of range for {} options",
+            self.options.len()
+        );
         self.selected = Some(index);
+        self
+    }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn with_visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
         self
     }
 }
@@ -148,6 +208,26 @@ impl<Message> RadioItem<Message> {
             accelerator: None,
         }
     }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn with_visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
+        self
+    }
+
+    pub fn with_icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    pub fn with_accelerator(mut self, accelerator: Accelerator) -> Self {
+        self.accelerator = Some(accelerator);
+        self
+    }
 }
 
 /// A non-clickable menu branch.
@@ -169,6 +249,21 @@ impl<Message> Submenu<Message> {
             icon: None,
             children,
         }
+    }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn with_visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
+        self
+    }
+
+    pub fn with_icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
     }
 }
 
@@ -228,22 +323,11 @@ pub const CMD_OR_CTRL: Modifiers = Modifiers::SUPER;
 #[cfg(not(target_os = "macos"))]
 pub const CMD_OR_CTRL: Modifiers = Modifiers::CONTROL;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum AcceleratorError {
+    #[error("unsupported accelerator key on this platform: {0:?}")]
     UnsupportedKey(Code),
 }
-
-impl fmt::Display for AcceleratorError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AcceleratorError::UnsupportedKey(code) => {
-                write!(f, "unsupported accelerator key on this platform: {code:?}")
-            },
-        }
-    }
-}
-
-impl std::error::Error for AcceleratorError {}
 
 fn write_display_code(f: &mut fmt::Formatter<'_>, code: Code) -> fmt::Result {
     match code {

@@ -47,11 +47,9 @@ impl Tray for WinitTray {
         vec![
             CheckItem::new("Tick once per second", self.ticking, Message::ToggleTicks).into(),
             MenuItem::Separator,
-            {
-                let mut quit = StandardItem::new("Quit", Message::Quit);
-                quit.accelerator = Some(Accelerator::new(Some(CMD_OR_CTRL), Code::KeyQ));
-                quit.into()
-            },
+            StandardItem::new("Quit", Message::Quit)
+                .with_accelerator(Accelerator::new(Some(CMD_OR_CTRL), Code::KeyQ))
+                .into(),
         ]
     }
 
