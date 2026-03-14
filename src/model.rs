@@ -141,11 +141,16 @@ fn normalize_menu_items<Message>(
                 }
             },
             MenuItem::Submenu(submenu) if submenu.visible => {
+                let children = normalize_menu_items(submenu.children);
+                if children.is_empty() {
+                    continue;
+                }
+
                 normalized.push(NormalizedMenuItem::Submenu(NormalizedSubmenu {
                     label: submenu.label,
                     enabled: submenu.enabled,
                     icon: submenu.icon,
-                    children: normalize_menu_items(submenu.children),
+                    children,
                 }));
             },
             MenuItem::Separator => normalized.push(NormalizedMenuItem::Separator),
@@ -153,7 +158,33 @@ fn normalize_menu_items<Message>(
         }
     }
 
-    normalized
+    compact_menu_items(normalized)
+}
+
+fn compact_menu_items<Message>(
+    items: Vec<NormalizedMenuItem<Message>>,
+) -> Vec<NormalizedMenuItem<Message>> {
+    let mut compacted = Vec::with_capacity(items.len());
+    let mut pending_separator = false;
+
+    for item in items {
+        match item {
+            NormalizedMenuItem::Separator => {
+                if !compacted.is_empty() {
+                    pending_separator = true;
+                }
+            },
+            item => {
+                if pending_separator {
+                    compacted.push(NormalizedMenuItem::Separator);
+                    pending_separator = false;
+                }
+                compacted.push(item);
+            },
+        }
+    }
+
+    compacted
 }
 
 pub fn diff_menu_items<Message: Clone>(
@@ -378,5 +409,44 @@ mod tests {
         ]));
 
         assert_eq!(diff_menu_items(&old.menu, &new.menu), MenuDiff::Rebuild);
+    }
+
+    #[test]
+    fn normalization_prunes_empty_submenus() {
+        let tray = test_tray(vec![
+            Submenu::new("Empty", vec![]).into(),
+            Submenu::new("Hidden only", {
+                let mut hidden = StandardItem::new("Hidden", Message::A);
+                hidden.visible = false;
+                vec![hidden.into()]
+            })
+            .into(),
+        ]);
+
+        let normalized = NormalizedTrayView::from_tray(&tray);
+        assert!(normalized.menu.is_empty());
+    }
+
+    #[test]
+    fn normalization_trims_and_collapses_separators() {
+        let tray = test_tray(vec![
+            MenuItem::Separator,
+            StandardItem::new("A", Message::A).into(),
+            MenuItem::Separator,
+            MenuItem::Separator,
+            CheckItem::new("B", false, Message::B).into(),
+            MenuItem::Separator,
+            Submenu::new("Only separators", vec![MenuItem::Separator]).into(),
+            MenuItem::Separator,
+        ]);
+
+        let normalized = NormalizedTrayView::from_tray(&tray);
+        assert_eq!(normalized.menu.len(), 3);
+        assert!(matches!(
+            normalized.menu[0],
+            NormalizedMenuItem::Standard(_)
+        ));
+        assert!(matches!(normalized.menu[1], NormalizedMenuItem::Separator));
+        assert!(matches!(normalized.menu[2], NormalizedMenuItem::Check(_)));
     }
 }

@@ -155,7 +155,7 @@ fn main() {
     println!("Startup mode: spawn() self-hosted tray.");
     println!("Features in this example:");
     println!("- generated tray icon");
-    println!("- tooltip/title updates");
+    println!("- tooltip updates (title is platform-dependent)");
     println!("- check items");
     println!("- radio group");
     println!("- submenu");

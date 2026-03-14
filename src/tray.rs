@@ -18,6 +18,9 @@ pub trait Tray: Sized + Send + 'static {
     }
 
     /// Tray title or label, if supported by the platform.
+    ///
+    /// Platform note:
+    /// - Windows: unsupported.
     fn title(&self) -> Option<String> {
         None
     }

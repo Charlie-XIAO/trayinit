@@ -367,7 +367,6 @@ where
 
         let previous_view = self.native.view.as_ref();
         let icon_changed = previous_view.is_none_or(|old| old.icon != view.icon);
-        let title_changed = previous_view.is_none_or(|old| old.title != view.title);
         let tooltip_changed = previous_view.is_none_or(|old| old.tooltip != view.tooltip);
         let visible_changed = previous_view.is_none_or(|old| old.visible != view.visible);
         let menu_on_primary_click_changed =
@@ -378,7 +377,7 @@ where
         };
 
         self.native.menu_on_primary_click = view.menu_on_primary_click;
-        self.native.tooltip = tooltip_text(&view);
+        self.native.tooltip = view.tooltip.clone();
 
         if icon_changed {
             self.native.icon = match view.icon.as_ref() {
@@ -439,7 +438,6 @@ where
         if self.native.visible {
             if !self.native.registered
                 || icon_changed
-                || title_changed
                 || tooltip_changed
                 || visible_changed
                 || menu_on_primary_click_changed
@@ -694,14 +692,6 @@ fn rect_from_raw(rect: RECT) -> (PhysicalPosition<i32>, PhysicalSize<i32>) {
             rect.bottom.saturating_sub(rect.top),
         ),
     )
-}
-
-fn tooltip_text<Id>(view: &NormalizedTrayView<Id>) -> Option<String> {
-    if let Some(tooltip) = &view.tooltip {
-        Some(tooltip.clone())
-    } else {
-        view.title.clone()
-    }
 }
 
 fn register_tray_icon(
