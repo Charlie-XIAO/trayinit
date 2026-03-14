@@ -6,7 +6,7 @@ use std::time::Duration;
 use trayinit::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
 use trayinit::{Icon, Tray, TrayEvent, TrayMethods};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone)]
 enum Message {
     ToggleTicks,
     TogglePrimaryClickMenu,
@@ -17,7 +17,7 @@ enum Message {
     Quit,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone)]
 enum Accent {
     Red,
     Green,
@@ -25,7 +25,7 @@ enum Accent {
 }
 
 impl Accent {
-    fn rgb(self) -> (u8, u8, u8) {
+    fn rgb(&self) -> (u8, u8, u8) {
         match self {
             Self::Red => (0xE0, 0x52, 0x52),
             Self::Green => (0x2D, 0xB0, 0x72),
@@ -33,11 +33,11 @@ impl Accent {
         }
     }
 
-    fn selected_id(self) -> Message {
+    fn selected_index(&self) -> usize {
         match self {
-            Self::Red => Message::AccentRed,
-            Self::Green => Message::AccentGreen,
-            Self::Blue => Message::AccentBlue,
+            Self::Red => 0,
+            Self::Green => 1,
+            Self::Blue => 2,
         }
     }
 }
@@ -94,16 +94,12 @@ impl Tray for ShowcaseTray {
             .into(),
             StandardItem::new("Reset tick counter", Message::ResetTicks).into(),
             MenuItem::Separator,
-            RadioGroup {
-                selected: Some(self.accent.selected_id()),
-                options: vec![
-                    RadioItem::new("Accent: Red", Message::AccentRed),
-                    RadioItem::new("Accent: Green", Message::AccentGreen),
-                    RadioItem::new("Accent: Blue", Message::AccentBlue),
-                ],
-                enabled: true,
-                visible: true,
-            }
+            RadioGroup::new(vec![
+                RadioItem::new("Accent: Red", Message::AccentRed),
+                RadioItem::new("Accent: Green", Message::AccentGreen),
+                RadioItem::new("Accent: Blue", Message::AccentBlue),
+            ])
+            .with_selected(self.accent.selected_index())
             .into(),
             MenuItem::Submenu(Submenu::new(
                 "Session",

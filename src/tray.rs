@@ -1,5 +1,3 @@
-use core::hash::Hash;
-
 use dpi::{PhysicalPosition, PhysicalSize};
 
 use crate::menu::MenuItem;
@@ -9,7 +7,7 @@ use crate::{ClosedError, Error, Icon, Result};
 /// User-defined tray state.
 pub trait Tray: Sized + Send + 'static {
     /// Application-defined message type emitted by menu items.
-    type Message: Clone + Eq + Hash + Send + Sync + 'static;
+    type Message;
 
     /// Stable identifier for the tray instance.
     fn id(&self) -> &str;
@@ -64,7 +62,10 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///
     /// This is the preferred startup mode for windowed apps such as `winit`
     /// applications. The backend does not own the app's top-level control flow.
-    fn attach(self) -> Result<Handle<Self>> {
+    fn attach(self) -> Result<Handle<Self>>
+    where
+        Self::Message: Clone,
+    {
         self.builder().attach()
     }
 
@@ -72,7 +73,10 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///
     /// This is mainly a convenience for backends that can own themselves on a
     /// helper thread without taking over the caller's main thread.
-    fn spawn(self) -> Result<Handle<Self>> {
+    fn spawn(self) -> Result<Handle<Self>>
+    where
+        Self::Message: Clone,
+    {
         self.builder().spawn()
     }
 
@@ -80,7 +84,10 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///
     /// This mode is intended for tray-only apps where the tray runtime should
     /// own the application's top-level control flow.
-    fn run(self) -> Result<()> {
+    fn run(self) -> Result<()>
+    where
+        Self::Message: Clone,
+    {
         self.builder().run()
     }
 }
@@ -187,15 +194,24 @@ impl<T: Tray> Builder<T> {
         self.tray
     }
 
-    pub fn attach(self) -> Result<Handle<T>> {
+    pub fn attach(self) -> Result<Handle<T>>
+    where
+        T::Message: Clone,
+    {
         platform::attach(self)
     }
 
-    pub fn spawn(self) -> Result<Handle<T>> {
+    pub fn spawn(self) -> Result<Handle<T>>
+    where
+        T::Message: Clone,
+    {
         platform::spawn(self)
     }
 
-    pub fn run(self) -> Result<()> {
+    pub fn run(self) -> Result<()>
+    where
+        T::Message: Clone,
+    {
         platform::run(self)
     }
 }

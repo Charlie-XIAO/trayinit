@@ -13,7 +13,7 @@ pub struct NormalizedTrayView<Message> {
     pub menu: Vec<NormalizedMenuItem<Message>>,
 }
 
-impl<Message: Clone + Eq> NormalizedTrayView<Message> {
+impl<Message> NormalizedTrayView<Message> {
     pub fn from_tray<T: Tray<Message = Message>>(tray: &T) -> Self {
         Self {
             icon: tray.icon(),
@@ -93,7 +93,7 @@ pub struct NormalizedSubmenu<Message> {
     pub children: Vec<NormalizedMenuItem<Message>>,
 }
 
-fn normalize_menu_items<Message: Clone + Eq>(
+fn normalize_menu_items<Message>(
     items: Vec<MenuItem<Message>>,
 ) -> Vec<NormalizedMenuItem<Message>> {
     let mut normalized = Vec::new();
@@ -123,19 +123,19 @@ fn normalize_menu_items<Message: Clone + Eq>(
                 }));
             },
             MenuItem::RadioGroup(group) if group.visible => {
-                for option in group.options {
+                for (index, option) in group.options.into_iter().enumerate() {
                     if !option.visible {
                         continue;
                     }
 
                     normalized.push(NormalizedMenuItem::Radio(NormalizedCommandItem {
-                        message: option.message.clone(),
+                        message: option.message,
                         label: option.label,
                         enabled: group.enabled && option.enabled,
                         icon: option.icon,
                         accelerator: option.accelerator,
                         state: CommandState::Radio {
-                            selected: group.selected.as_ref() == Some(&option.message),
+                            selected: group.selected == Some(index),
                         },
                     }));
                 }
@@ -156,7 +156,7 @@ fn normalize_menu_items<Message: Clone + Eq>(
     normalized
 }
 
-pub fn diff_menu_items<Message: Clone + Eq>(
+pub fn diff_menu_items<Message: Clone>(
     old: &[NormalizedMenuItem<Message>],
     new: &[NormalizedMenuItem<Message>],
 ) -> MenuDiff<Message> {
@@ -195,7 +195,7 @@ fn has_same_shape<Message>(
     })
 }
 
-fn collect_menu_patches<Message: Clone + Eq>(
+fn collect_menu_patches<Message: Clone>(
     old: &[NormalizedMenuItem<Message>],
     new: &[NormalizedMenuItem<Message>],
     path: &mut Vec<usize>,
@@ -208,7 +208,12 @@ fn collect_menu_patches<Message: Clone + Eq>(
             (NormalizedMenuItem::Standard(old), NormalizedMenuItem::Standard(new))
             | (NormalizedMenuItem::Check(old), NormalizedMenuItem::Check(new))
             | (NormalizedMenuItem::Radio(old), NormalizedMenuItem::Radio(new)) => {
-                if old != new {
+                if old.label != new.label
+                    || old.enabled != new.enabled
+                    || old.icon != new.icon
+                    || old.accelerator != new.accelerator
+                    || old.state != new.state
+                {
                     patches.push(MenuPatch::Command {
                         path: MenuPath::new(path.clone()),
                         item: new.clone(),
@@ -310,16 +315,14 @@ mod tests {
         let mut hidden = RadioItem::new("Hidden", Message::B);
         hidden.visible = false;
 
-        let tray = test_tray(vec![MenuItem::RadioGroup(RadioGroup {
-            selected: Some(Message::C),
-            options: vec![
+        let tray = test_tray(vec![MenuItem::RadioGroup(
+            RadioGroup::new(vec![
                 RadioItem::new("A", Message::A),
                 hidden,
                 RadioItem::new("C", Message::C),
-            ],
-            enabled: true,
-            visible: true,
-        })]);
+            ])
+            .with_selected(2),
+        )]);
 
         let normalized = NormalizedTrayView::from_tray(&tray);
         assert_eq!(normalized.menu.len(), 2);
@@ -347,6 +350,21 @@ mod tests {
         assert!(matches!(
             diff_menu_items(&old.menu, &new.menu),
             MenuDiff::Patch(_)
+        ));
+    }
+
+    #[test]
+    fn message_change_does_not_trigger_visual_patch() {
+        let old = NormalizedTrayView::from_tray(&test_tray(vec![
+            StandardItem::new("A", Message::A).into(),
+        ]));
+        let new = NormalizedTrayView::from_tray(&test_tray(vec![
+            StandardItem::new("A", Message::B).into(),
+        ]));
+
+        assert!(matches!(
+            diff_menu_items(&old.menu, &new.menu),
+            MenuDiff::None
         ));
     }
 

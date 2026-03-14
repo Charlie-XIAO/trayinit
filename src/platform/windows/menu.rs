@@ -6,9 +6,9 @@ use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWi
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED, MF_DISABLED,
     MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MFS_CHECKED, MFS_DISABLED,
-    MFS_ENABLED, MFS_UNCHECKED, MIIM_BITMAP, MIIM_STATE, MIIM_STRING, SetForegroundWindow,
-    SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TrackPopupMenu, WM_NCACTIVATE,
-    WM_NCPAINT,
+    MFS_ENABLED, MFS_UNCHECKED, MFT_RADIOCHECK, MIIM_BITMAP, MIIM_FTYPE, MIIM_STATE, MIIM_STRING,
+    SetForegroundWindow, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+    TrackPopupMenu, WM_NCACTIVATE, WM_NCPAINT,
 };
 
 use super::dark_menu_bar;
@@ -29,7 +29,7 @@ pub struct RenderedMenu<Message> {
     command_map: HashMap<u32, Message>,
 }
 
-impl<Message: Clone + Eq> RenderedMenu<Message> {
+impl<Message: Clone> RenderedMenu<Message> {
     pub fn from_model(items: &[NormalizedMenuItem<Message>]) -> Option<Self> {
         let root = unsafe { CreatePopupMenu() };
         if root.is_null() {
@@ -83,6 +83,16 @@ impl<Message: Clone + Eq> RenderedMenu<Message> {
         true
     }
 
+    pub fn sync_messages(&mut self, items: &[NormalizedMenuItem<Message>]) -> bool {
+        let mut command_map = HashMap::new();
+        if !Self::collect_command_map(&self.items, items, &mut command_map) {
+            return false;
+        }
+
+        self.command_map = command_map;
+        true
+    }
+
     fn apply_command_patch(
         &mut self,
         path: &[usize],
@@ -105,8 +115,9 @@ impl<Message: Clone + Eq> RenderedMenu<Message> {
         let bitmap = bitmap_from_icon(item.icon.as_ref());
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as _;
-        info.fMask = MIIM_STRING | MIIM_STATE | MIIM_BITMAP;
+        info.fMask = MIIM_STRING | MIIM_STATE | MIIM_BITMAP | MIIM_FTYPE;
         info.fState = command_state(item.state, item.enabled);
+        info.fType = command_type(item.state);
         info.dwTypeData = text.as_ptr() as *mut _;
         info.cch = text.len().saturating_sub(1) as _;
         info.hbmpItem = bitmap_handle(bitmap.as_ref());
@@ -135,12 +146,13 @@ impl<Message: Clone + Eq> RenderedMenu<Message> {
         let bitmap = bitmap_from_icon(item.icon.as_ref());
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as _;
-        info.fMask = MIIM_STRING | MIIM_STATE | MIIM_BITMAP;
+        info.fMask = MIIM_STRING | MIIM_STATE | MIIM_BITMAP | MIIM_FTYPE;
         info.fState = if item.enabled {
             MFS_ENABLED
         } else {
             MFS_DISABLED
         };
+        info.fType = 0;
         info.dwTypeData = text.as_ptr() as *mut _;
         info.cch = text.len().saturating_sub(1) as _;
         info.hbmpItem = bitmap_handle(bitmap.as_ref());
@@ -172,6 +184,41 @@ impl<Message: Clone + Eq> RenderedMenu<Message> {
             },
             _ => None,
         }
+    }
+
+    fn collect_command_map(
+        nodes: &[NativeMenuItem],
+        items: &[NormalizedMenuItem<Message>],
+        command_map: &mut HashMap<u32, Message>,
+    ) -> bool {
+        if nodes.len() != items.len() {
+            return false;
+        }
+
+        for (node, item) in nodes.iter().zip(items) {
+            match (&node.kind, item) {
+                (NativeMenuItemKind::Separator, NormalizedMenuItem::Separator) => {},
+                (
+                    NativeMenuItemKind::Command { command },
+                    NormalizedMenuItem::Standard(item)
+                    | NormalizedMenuItem::Check(item)
+                    | NormalizedMenuItem::Radio(item),
+                ) => {
+                    command_map.insert(*command, item.message.clone());
+                },
+                (
+                    NativeMenuItemKind::Submenu { children, .. },
+                    NormalizedMenuItem::Submenu(submenu),
+                ) => {
+                    if !Self::collect_command_map(children, &submenu.children, command_map) {
+                        return false;
+                    }
+                },
+                _ => return false,
+            }
+        }
+
+        true
     }
 }
 
@@ -207,7 +254,7 @@ struct MenuBuilder<Message> {
     command_map: HashMap<u32, Message>,
 }
 
-impl<Message: Clone + Eq> MenuBuilder<Message> {
+impl<Message: Clone> MenuBuilder<Message> {
     fn append_items(
         &mut self,
         parent: HMENU,
@@ -268,6 +315,7 @@ impl<Message: Clone + Eq> MenuBuilder<Message> {
         }
 
         let bitmap = bitmap_from_icon(item.icon.as_ref());
+        set_menu_type_by_position(parent, position, item.state);
         set_menu_bitmap_by_position(parent, position, bitmap.as_ref());
         self.command_map.insert(command, item.message.clone());
 
@@ -362,6 +410,13 @@ fn command_state(state: CommandState, enabled: bool) -> u32 {
     flags
 }
 
+fn command_type(state: CommandState) -> u32 {
+    match state {
+        CommandState::Radio { .. } => MFT_RADIOCHECK,
+        _ => 0,
+    }
+}
+
 fn bitmap_from_icon(icon: Option<&Icon>) -> Option<OwnedBitmap> {
     let icon = icon?;
     OwnedBitmap::from_icon(icon).ok()
@@ -376,6 +431,17 @@ fn set_menu_bitmap_by_position(parent: HMENU, position: u32, bitmap: Option<&Own
     info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as _;
     info.fMask = MIIM_BITMAP;
     info.hbmpItem = bitmap_handle(bitmap);
+
+    unsafe {
+        SetMenuItemInfoW(parent, position, TRUE, &info);
+    }
+}
+
+fn set_menu_type_by_position(parent: HMENU, position: u32, state: CommandState) {
+    let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as _;
+    info.fMask = MIIM_FTYPE;
+    info.fType = command_type(state);
 
     unsafe {
         SetMenuItemInfoW(parent, position, TRUE, &info);

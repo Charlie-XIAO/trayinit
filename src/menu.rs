@@ -101,7 +101,8 @@ impl<Message> CheckItem<Message> {
 /// A radio item group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RadioGroup<Message> {
-    pub selected: Option<Message>,
+    /// Selected option index within `options`.
+    pub selected: Option<usize>,
     pub options: Vec<RadioItem<Message>>,
     pub enabled: bool,
     pub visible: bool,
@@ -115,6 +116,11 @@ impl<Message> RadioGroup<Message> {
             enabled: true,
             visible: true,
         }
+    }
+
+    pub fn with_selected(mut self, index: usize) -> Self {
+        self.selected = Some(index);
+        self
     }
 }
 

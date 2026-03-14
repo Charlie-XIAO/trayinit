@@ -6,7 +6,7 @@ use std::time::Duration;
 use trayinit::menu::{CheckItem, MenuItem, StandardItem};
 use trayinit::{Tray, TrayEvent, TrayMethods};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone)]
 enum Message {
     Toggle,
     Quit,

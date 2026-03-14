@@ -85,7 +85,10 @@ impl<T: Tray> fmt::Debug for PlatformHandle<T> {
     }
 }
 
-pub fn spawn<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
+pub fn spawn<T: Tray>(builder: Builder<T>) -> Result<Handle<T>>
+where
+    T::Message: Clone,
+{
     let Builder {
         tray,
         runtime_preference,
@@ -118,18 +121,27 @@ pub fn spawn<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
     }
 }
 
-pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
+pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>>
+where
+    T::Message: Clone,
+{
     // TODO: This should be changed as we implement more stuff
     spawn(builder)
 }
 
-pub fn run<T: Tray>(builder: Builder<T>) -> Result<()> {
+pub fn run<T: Tray>(builder: Builder<T>) -> Result<()>
+where
+    T::Message: Clone,
+{
     // TODO: Implement this
     let _ = builder;
     Err(Error::NotImplemented)
 }
 
-fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Result<()>>) {
+fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Result<()>>)
+where
+    T::Message: Clone,
+{
     match run_backend_thread(shared) {
         Ok(()) => {
             let _ = init_tx.send(Ok(()));
@@ -141,7 +153,10 @@ fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Res
     }
 }
 
-fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> Result<()> {
+fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> Result<()>
+where
+    T::Message: Clone,
+{
     // Reference: winit/src/platform_impl/windows/dpi.rs::become_dpi_aware.
     util::become_dpi_aware();
     // Reference:
@@ -310,7 +325,10 @@ struct WindowState<T: Tray> {
     native: NativeState<T::Message>,
 }
 
-impl<T: Tray> WindowState<T> {
+impl<T: Tray> WindowState<T>
+where
+    T::Message: Clone,
+{
     fn new(shared: Arc<Shared<T>>) -> Self {
         Self {
             shared,
@@ -349,6 +367,14 @@ impl<T: Tray> WindowState<T> {
         if self.native.menu_is_open {
             if !matches!(menu_diff, MenuDiff::None) {
                 self.native.menu_refresh_pending = true;
+            } else if let Some(menu) = self.native.menu.as_mut() {
+                if menu.sync_messages(&view.menu) {
+                    self.native.menu_view = Some(view.menu.clone());
+                } else {
+                    self.native.menu_refresh_pending = true;
+                }
+            } else {
+                self.native.menu_view = Some(view.menu.clone());
             }
         } else {
             self.native.menu_refresh_pending = false;
@@ -368,6 +394,16 @@ impl<T: Tray> WindowState<T> {
                     }
                 },
             }
+
+            let sync_ok = match self.native.menu.as_mut() {
+                Some(menu) => menu.sync_messages(&view.menu),
+                None => view.menu.is_empty(),
+            };
+
+            if !sync_ok {
+                self.native.menu = RenderedMenu::from_model(&view.menu);
+            }
+
             self.native.menu_view = Some(view.menu.clone());
         }
 
@@ -444,7 +480,10 @@ impl<T: Tray> WindowState<T> {
     }
 }
 
-impl<T: Tray> WindowOps for WindowState<T> {
+impl<T: Tray> WindowOps for WindowState<T>
+where
+    T::Message: Clone,
+{
     fn set_hwnd(&mut self, hwnd: HWND) {
         self.native.hwnd = hwnd;
         self.shared.hwnd.store(hwnd as isize, Ordering::Release);
@@ -574,7 +613,7 @@ struct NativeState<Id> {
 
 // SAFETY: NativeState is only ever accessed on the dedicated Windows backend
 // thread.
-unsafe impl<Id: Send> Send for NativeState<Id> {}
+unsafe impl<Id> Send for NativeState<Id> {}
 
 impl<Id> NativeState<Id> {
     fn new() -> Self {

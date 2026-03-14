@@ -26,17 +26,26 @@ impl<T: Tray> PlatformHandle<T> {
     }
 }
 
-pub fn spawn<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
+pub fn spawn<T: Tray>(builder: Builder<T>) -> Result<Handle<T>>
+where
+    T::Message: Clone,
+{
     let _ = builder;
     Err(Error::NotImplemented)
 }
 
-pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>> {
+pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>>
+where
+    T::Message: Clone,
+{
     let _ = builder;
     Err(Error::NotImplemented)
 }
 
-pub fn run<T: Tray>(builder: Builder<T>) -> Result<()> {
+pub fn run<T: Tray>(builder: Builder<T>) -> Result<()>
+where
+    T::Message: Clone,
+{
     let _ = builder;
     Err(Error::NotImplemented)
 }
