@@ -172,9 +172,22 @@ pub fn run<T: Tray>(builder: Builder<T>) -> Result<()>
 where
     T::Message: Clone,
 {
-    // TODO: Implement this
-    let _ = builder;
-    Err(Error::NotImplemented)
+    let Builder {
+        tray,
+        runtime_preference,
+        linux: _,
+    } = builder;
+
+    if matches!(runtime_preference, RuntimePreference::DedicatedThread) {
+        return Err(Error::Unsupported(
+            "dedicated-thread Windows run() is not supported",
+        ));
+    }
+
+    let shared = Arc::new(Shared::new(tray));
+    initialize_backend::<T>(Arc::clone(&shared), true)?;
+    message_loop(&shared);
+    Ok(())
 }
 
 fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Result<()>>)
@@ -496,6 +509,7 @@ where
         if let Err(error) = self.render() {
             eprintln!("trayinit: refresh after event failed: {error}");
         }
+        self.maybe_request_shutdown();
     }
 
     fn activate_event(&self) -> ActivateEvent {
@@ -535,6 +549,12 @@ where
             false
         }
     }
+
+    fn maybe_request_shutdown(&self) {
+        if self.shared.should_exit() {
+            let _ = self.shared.post_close();
+        }
+    }
 }
 
 impl<T: Tray> WindowOps for WindowState<T>
@@ -554,13 +574,16 @@ where
     }
 
     fn initial_render(&mut self) -> Result<()> {
-        self.render()
+        self.render()?;
+        self.maybe_request_shutdown();
+        Ok(())
     }
 
     fn on_refresh(&mut self) {
         if let Err(error) = self.render() {
             eprintln!("trayinit: refresh failed: {error}");
         }
+        self.maybe_request_shutdown();
     }
 
     fn on_taskbar_created(&mut self) {
@@ -697,6 +720,11 @@ impl<T: Tray> Shared<T> {
 
     fn clear_accelerator_windows(&self) {
         self.lock_accelerator_windows().clear();
+    }
+
+    fn should_exit(&self) -> bool {
+        let tray = self.lock_tray();
+        tray.should_exit()
     }
 
     fn post_message(&self, msg: u32) -> Result<(), ClosedError> {

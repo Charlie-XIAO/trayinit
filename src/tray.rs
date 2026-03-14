@@ -52,6 +52,16 @@ pub trait Tray: Sized + Send + 'static {
 
     /// Applies a tray-originated event back into the state.
     fn event(&mut self, event: TrayEvent<Self::Message>);
+
+    /// Whether the tray runtime should shut down.
+    ///
+    /// This is primarily used by standalone [`TrayMethods::run`] mode, where
+    /// there is no external [`Handle`] to request shutdown. Backends may also
+    /// honor it in other startup modes by destroying only the tray runtime,
+    /// without taking down any host application loop.
+    fn should_exit(&self) -> bool {
+        false
+    }
 }
 
 /// Blanket convenience methods for [`Tray`] implementations.
