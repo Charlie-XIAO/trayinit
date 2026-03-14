@@ -36,9 +36,16 @@ const WM_USER_REFRESH: u32 = 6003;
 static NEXT_INTERNAL_ID: AtomicU32 = AtomicU32::new(1);
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 
-#[derive(Clone)]
 pub struct PlatformHandle<T: Tray> {
     shared: Arc<Shared<T>>,
+}
+
+impl<T: Tray> Clone for PlatformHandle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+        }
+    }
 }
 
 impl<T: Tray> PlatformHandle<T> {
@@ -125,8 +132,24 @@ pub fn attach<T: Tray>(builder: Builder<T>) -> Result<Handle<T>>
 where
     T::Message: Clone,
 {
-    // TODO: This should be changed as we implement more stuff
-    spawn(builder)
+    if matches!(
+        builder.runtime_preference_ref(),
+        RuntimePreference::DedicatedThread
+    ) {
+        return spawn(builder);
+    }
+
+    let Builder {
+        tray,
+        runtime_preference: _,
+        linux: _,
+    } = builder;
+
+    let tray_id = tray.id().to_string();
+    let shared = Arc::new(Shared::new(tray));
+    initialize_backend::<T>(Arc::clone(&shared))?;
+
+    Ok(Handle::new(tray_id, PlatformHandle::new(shared)))
 }
 
 pub fn run<T: Tray>(builder: Builder<T>) -> Result<()>
@@ -142,7 +165,7 @@ fn backend_thread<T: Tray>(shared: Arc<Shared<T>>, init_tx: mpsc::SyncSender<Res
 where
     T::Message: Clone,
 {
-    match run_backend_thread(shared) {
+    match initialize_backend(shared) {
         Ok(()) => {
             let _ = init_tx.send(Ok(()));
             message_loop();
@@ -153,7 +176,7 @@ where
     }
 }
 
-fn run_backend_thread<T: Tray>(shared: Arc<Shared<T>>) -> Result<()>
+fn initialize_backend<T: Tray>(shared: Arc<Shared<T>>) -> Result<()>
 where
     T::Message: Clone,
 {

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use trayinit::menu::{CheckItem, MenuItem, StandardItem};
@@ -64,7 +65,7 @@ impl Tray for WinitTray {
 struct App {
     tray: Option<Handle<WinitTray>>,
     keep_running: Arc<AtomicBool>,
-    next_tick: Instant,
+    ticker_started: bool,
 }
 
 impl ApplicationHandler for App {
@@ -76,10 +77,39 @@ impl ApplicationHandler for App {
                 keep_running: Arc::clone(&self.keep_running),
             };
             let handle = tray.attach().expect("attach winit tray example");
+            let ticker_handle = handle.clone();
+            let ticker_running = Arc::clone(&self.keep_running);
+
+            if !self.ticker_started {
+                self.ticker_started = true;
+                thread::spawn(move || {
+                    while ticker_running.load(Ordering::Relaxed) {
+                        thread::sleep(Duration::from_secs(1));
+
+                        if !ticker_running.load(Ordering::Relaxed) {
+                            break;
+                        }
+
+                        if ticker_handle
+                            .update(|tray| {
+                                if tray.ticking {
+                                    tray.ticks = tray.ticks.saturating_add(1);
+                                }
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+
             self.tray = Some(handle);
         }
 
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_tick));
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(100),
+        ));
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -91,19 +121,9 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let now = Instant::now();
-        if now >= self.next_tick {
-            if let Some(tray) = &self.tray {
-                let _ = tray.update(|tray| {
-                    if tray.ticking {
-                        tray.ticks = tray.ticks.saturating_add(1);
-                    }
-                });
-            }
-            self.next_tick = now + Duration::from_secs(1);
-        }
-
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_tick));
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(100),
+        ));
     }
 
     fn window_event(
@@ -125,7 +145,7 @@ fn main() {
     let mut app = App {
         tray: None,
         keep_running: Arc::new(AtomicBool::new(true)),
-        next_tick: Instant::now() + Duration::from_secs(1),
+        ticker_started: false,
     };
 
     event_loop.run_app(&mut app).expect("run winit app");

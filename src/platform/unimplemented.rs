@@ -2,9 +2,17 @@ use std::marker::PhantomData;
 
 use crate::{Builder, ClosedError, Error, Handle, Result, Tray};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PlatformHandle<T: Tray> {
     _phantom: PhantomData<T>,
+}
+
+impl<T: Tray> Clone for PlatformHandle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
 }
 
 impl<T: Tray> PlatformHandle<T> {

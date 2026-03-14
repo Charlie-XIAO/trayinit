@@ -245,10 +245,19 @@ impl Default for LinuxOptions {
 }
 
 /// Control channel to a running tray.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Handle<T: Tray> {
     tray_id: String,
     inner: PlatformHandle<T>,
+}
+
+impl<T: Tray> Clone for Handle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            tray_id: self.tray_id.clone(),
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<T: Tray> Handle<T> {
