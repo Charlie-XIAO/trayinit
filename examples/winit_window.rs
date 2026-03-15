@@ -190,6 +190,8 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     println!("Running winit window tray example.");
     println!("Startup mode: attach() host-integrated tray.");
     println!("A real winit window is created and registered for tray accelerators.");

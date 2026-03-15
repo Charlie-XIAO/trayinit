@@ -137,6 +137,8 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     println!("Running winit no-window tray example.");
     println!("Startup mode: attach() host-integrated tray.");
     println!("No window is created. winit only owns the application loop.");

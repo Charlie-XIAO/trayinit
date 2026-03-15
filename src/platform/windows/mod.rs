@@ -11,29 +11,31 @@ use std::{fmt, io, ptr, thread};
 use dpi::{PhysicalPosition, PhysicalSize};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM};
 use windows_sys::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-    NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect, Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_SELECT,
+    NINF_KEY, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect,
+    Shell_NotifyIconW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CW_USEDEFAULT, ChangeWindowMessageFilterEx, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, GWL_USERDATA, GetCursorPos, GetMessageW, MSG, MSGFLT_ALLOW,
     PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageA, TranslateMessage,
-    WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_NCCREATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
-    WS_OVERLAPPED,
+    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_NCCREATE, WM_RBUTTONDBLCLK,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT, WS_OVERLAPPED,
 };
 
 use self::icon::OwnedIcon;
 use self::menu::RenderedMenu;
 use crate::model::{MenuDiff, NormalizedMenuItem, NormalizedTrayView, diff_menu_items};
 use crate::{
-    Builder, ClosedError, Error, Handle, InteractionEvent, InteractionKind, InteractionTrigger,
-    PointerButton, PointerEventKind, PointerTrigger, Result, RuntimePreference, Tray, TrayEvent,
+    Builder, ClosedError, Error, Handle, InteractionEvent, InteractionKind, Result,
+    RuntimePreference, Tray, TrayEvent,
 };
 
 const WM_USER_TRAYICON: u32 = 6002;
 const WM_USER_REFRESH: u32 = 6003;
+const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
 
 static NEXT_INTERNAL_ID: AtomicU32 = AtomicU32::new(1);
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
@@ -126,6 +128,8 @@ where
     }
 
     let tray_id = tray.id().to_string();
+    #[cfg(feature = "tracing")]
+    tracing::debug!(tray_id = %tray_id, "Starting Windows tray backend in spawn mode");
     let thread_name = format!("trayinit-{}", tray_id);
     let shared = Arc::new(Shared::new(tray));
     let init_shared = Arc::clone(&shared);
@@ -163,6 +167,8 @@ where
     } = builder;
 
     let tray_id = tray.id().to_string();
+    #[cfg(feature = "tracing")]
+    tracing::debug!(tray_id = %tray_id, "Starting Windows tray backend in attach mode");
     let shared = Arc::new(Shared::new(tray));
     initialize_backend::<T>(Arc::clone(&shared), false)?;
 
@@ -185,6 +191,8 @@ where
         ));
     }
 
+    #[cfg(feature = "tracing")]
+    tracing::debug!(tray_id = %tray.id(), "Starting Windows tray backend in run mode");
     let shared = Arc::new(Shared::new(tray));
     initialize_backend::<T>(Arc::clone(&shared), true)?;
     message_loop(&shared);
@@ -348,7 +356,7 @@ unsafe extern "system" fn window_proc(
             return 0;
         },
         WM_USER_TRAYICON => {
-            user_data.ops.on_tray_message(lparam);
+            user_data.ops.on_tray_message(wparam, lparam);
             return 0;
         },
         WM_COMMAND => {
@@ -380,7 +388,7 @@ trait WindowOps: Send {
     fn initial_render(&mut self) -> Result<()>;
     fn on_refresh(&mut self);
     fn on_taskbar_created(&mut self);
-    fn on_tray_message(&mut self, lparam: LPARAM);
+    fn on_tray_message(&mut self, wparam: WPARAM, lparam: LPARAM);
     fn on_command(&mut self, command: u32);
     fn on_destroy(&mut self) -> bool;
 }
@@ -516,36 +524,27 @@ where
     fn interaction_event(
         &self,
         kind: InteractionKind,
-        trigger: InteractionTrigger,
+        position: Option<PhysicalPosition<i32>>,
     ) -> InteractionEvent {
         InteractionEvent {
             kind,
-            trigger,
-            position: cursor_position(),
+            position: position.or_else(cursor_position),
             area: get_tray_rect(self.native.internal_id, self.native.hwnd).map(rect_from_raw),
         }
     }
 
-    fn pointer_interaction_event(
-        &self,
-        kind: InteractionKind,
-        button: PointerButton,
-        event: PointerEventKind,
-    ) -> InteractionEvent {
-        self.interaction_event(
-            kind,
-            InteractionTrigger::Pointer(PointerTrigger { button, event }),
-        )
-    }
-
-    fn show_menu(&mut self) -> bool {
+    fn show_menu(&mut self, anchor: Option<PhysicalPosition<i32>>) -> bool {
         let Some(menu) = self.native.menu.as_ref() else {
             return false;
         };
 
         // Reference: muda/src/platform_impl/windows/mod.rs::show_context_menu.
         self.native.menu_is_open = true;
-        let command = menu::show_popup_menu(self.native.hwnd, menu.handle());
+        let command = menu::show_popup_menu(
+            self.native.hwnd,
+            menu.handle(),
+            anchor.map(point_from_position),
+        );
         self.native.menu_is_open = false;
 
         let selected_id = command.and_then(|command| {
@@ -610,53 +609,94 @@ where
         // restart branch. Explorer owns the tray area, so we must re-add the icon after
         // it restarts.
         self.native.registered = false;
+        self.native.uses_notifyicon_v4 = false;
+        self.native.pending_shell_followup = None;
         if self.native.visible {
             self.native.sync_tray_icon();
         }
     }
 
-    fn on_tray_message(&mut self, lparam: LPARAM) {
+    fn on_tray_message(&mut self, wparam: WPARAM, lparam: LPARAM) {
         // Reference: tray-icon/src/platform_impl/windows/mod.rs::tray_proc.
         // Windows already distinguishes left/right/middle button callbacks and
         // double-clicks for notification icons. We preserve that as trigger
         // detail while still emitting semantic interaction events.
-        match lparam as u32 {
+        let notification = notification_code(lparam);
+        let position = notification_anchor_position(self.native.uses_notifyicon_v4, wparam);
+        let pending_followup = self.native.pending_shell_followup.take();
+
+        match notification {
+            NIN_KEYSELECT => {
+                if pending_followup != Some(ShellFollowup::PrimaryActivate) {
+                    if self.native.menu_on_primary_click && self.native.menu.is_some() {
+                        let _ = self.show_menu(position);
+                    } else {
+                        self.dispatch_event(TrayEvent::Interaction(
+                            self.interaction_event(InteractionKind::PrimaryActivate, position),
+                        ));
+                    }
+                }
+            },
+            NIN_SELECT => {
+                if pending_followup != Some(ShellFollowup::PrimaryActivate) {
+                    self.dispatch_event(TrayEvent::Interaction(
+                        self.interaction_event(InteractionKind::PrimaryActivate, position),
+                    ));
+                }
+            },
+            WM_CONTEXTMENU => {
+                if pending_followup != Some(ShellFollowup::ContextMenu) {
+                    if self.native.menu.is_some() {
+                        let _ = self.show_menu(position);
+                    } else {
+                        self.dispatch_event(TrayEvent::Interaction(
+                            self.interaction_event(InteractionKind::ContextMenu, position),
+                        ));
+                    }
+                }
+            },
             WM_LBUTTONUP => {
+                // On some Explorer paths, a primary activation arrives first as
+                // WM_LBUTTONUP and is then followed by NIN_SELECT. Record the
+                // already-emitted semantic event so the shell follow-up can be
+                // suppressed instead of producing a duplicate.
+                self.native.pending_shell_followup = Some(ShellFollowup::PrimaryActivate);
                 if self.native.menu_on_primary_click && self.native.menu.is_some() {
-                    let _ = self.show_menu();
+                    let _ = self.show_menu(position);
                 } else {
-                    self.dispatch_event(TrayEvent::Interaction(self.pointer_interaction_event(
-                        InteractionKind::PrimaryActivate,
-                        PointerButton::Left,
-                        PointerEventKind::Up,
-                    )));
+                    self.dispatch_event(TrayEvent::Interaction(
+                        self.interaction_event(InteractionKind::PrimaryActivate, position),
+                    ));
                 }
             },
             WM_RBUTTONUP => {
+                // Explorer can likewise follow WM_RBUTTONUP with WM_CONTEXTMENU
+                // for the same logical gesture.
+                self.native.pending_shell_followup = Some(ShellFollowup::ContextMenu);
                 if self.native.menu.is_some() {
-                    let _ = self.show_menu();
+                    let _ = self.show_menu(position);
                 } else {
-                    self.dispatch_event(TrayEvent::Interaction(self.pointer_interaction_event(
-                        InteractionKind::ContextMenu,
-                        PointerButton::Right,
-                        PointerEventKind::Up,
-                    )));
+                    self.dispatch_event(TrayEvent::Interaction(
+                        self.interaction_event(InteractionKind::ContextMenu, position),
+                    ));
                 }
             },
             WM_MBUTTONUP => {
-                self.dispatch_event(TrayEvent::Interaction(self.pointer_interaction_event(
-                    InteractionKind::SecondaryActivate,
-                    PointerButton::Middle,
-                    PointerEventKind::Up,
-                )));
+                self.dispatch_event(TrayEvent::Interaction(
+                    self.interaction_event(InteractionKind::SecondaryActivate, position),
+                ));
             },
             // Windows delivers double-click messages in addition to the normal
             // click sequence. We keep the richer public type, but do not emit
             // semantic double-click interactions until the backend can suppress
             // duplicate single-click activation correctly.
             WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_LBUTTONDBLCLK
-            | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK => {},
-            _ => {},
+            | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK => {
+                self.native.pending_shell_followup = None;
+            },
+            _ => {
+                self.native.pending_shell_followup = None;
+            },
         }
     }
 
@@ -812,6 +852,17 @@ struct NativeState<Id> {
     visible: bool,
     registered: bool,
     menu_on_primary_click: bool,
+    uses_notifyicon_v4: bool,
+    // Explorer sometimes reports one logical tray interaction twice: first as a
+    // mouse-style callback, then as a higher-level shell semantic notification.
+    // Keep only enough state to suppress that second notification.
+    pending_shell_followup: Option<ShellFollowup>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShellFollowup {
+    PrimaryActivate,
+    ContextMenu,
 }
 
 // SAFETY: NativeState is only ever accessed on the dedicated Windows backend
@@ -833,6 +884,8 @@ impl<Id: Clone> NativeState<Id> {
             visible: true,
             registered: false,
             menu_on_primary_click: false,
+            uses_notifyicon_v4: false,
+            pending_shell_followup: None,
         }
     }
 
@@ -843,7 +896,10 @@ impl<Id: Clone> NativeState<Id> {
         let updated = if self.registered {
             modify_tray_icon(self.hwnd, self.internal_id, icon_handle, tooltip)
         } else {
-            register_tray_icon(self.hwnd, self.internal_id, icon_handle, tooltip)
+            let (registered, uses_notifyicon_v4) =
+                register_tray_icon(self.hwnd, self.internal_id, icon_handle, tooltip);
+            self.uses_notifyicon_v4 = uses_notifyicon_v4;
+            registered
         };
 
         self.registered = updated;
@@ -854,6 +910,8 @@ impl<Id: Clone> NativeState<Id> {
             remove_tray_icon(self.hwnd, self.internal_id);
             self.registered = false;
         }
+        self.uses_notifyicon_v4 = false;
+        self.pending_shell_followup = None;
     }
 
     fn accelerator_handle(&self) -> windows_sys::Win32::UI::WindowsAndMessaging::HACCEL {
@@ -887,10 +945,18 @@ fn register_tray_icon(
     tray_id: u32,
     hicon: Option<windows_sys::Win32::UI::WindowsAndMessaging::HICON>,
     tooltip: Option<&str>,
-) -> bool {
+) -> (bool, bool) {
     // Reference: tray-icon/src/platform_impl/windows/mod.rs::register_tray_icon.
     let mut icon_data = notify_icon_data(hwnd, tray_id, hicon, tooltip);
-    unsafe { Shell_NotifyIconW(NIM_ADD, &mut icon_data) == TRUE }
+    let added = unsafe { Shell_NotifyIconW(NIM_ADD, &mut icon_data) == TRUE };
+    if !added {
+        return (false, false);
+    }
+
+    // Reference: Shell_NotifyIconW documentation for NIM_SETVERSION and
+    // NOTIFYICON_VERSION_4 callback semantics.
+    let uses_notifyicon_v4 = unsafe { Shell_NotifyIconW(NIM_SETVERSION, &mut icon_data) == TRUE };
+    (true, uses_notifyicon_v4)
 }
 
 fn modify_tray_icon(
@@ -947,7 +1013,39 @@ fn notify_icon_data(
         uCallbackMessage: WM_USER_TRAYICON,
         hIcon: icon_handle,
         szTip: tip,
+        Anonymous: windows_sys::Win32::UI::Shell::NOTIFYICONDATAW_0 {
+            uVersion: NOTIFYICON_VERSION_4,
+        },
         ..unsafe { std::mem::zeroed() }
+    }
+}
+
+fn notification_code(lparam: LPARAM) -> u32 {
+    (lparam as u32) & 0xffff
+}
+
+fn notification_anchor_position(
+    uses_notifyicon_v4: bool,
+    wparam: WPARAM,
+) -> Option<PhysicalPosition<i32>> {
+    if !uses_notifyicon_v4 {
+        return None;
+    }
+
+    Some(PhysicalPosition::new(
+        signed_word((wparam as u32) & 0xffff),
+        signed_word(((wparam as u32) >> 16) & 0xffff),
+    ))
+}
+
+fn signed_word(value: u32) -> i32 {
+    (value as i16) as i32
+}
+
+fn point_from_position(position: PhysicalPosition<i32>) -> POINT {
+    POINT {
+        x: position.x,
+        y: position.y,
     }
 }
 

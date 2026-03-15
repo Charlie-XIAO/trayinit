@@ -138,7 +138,6 @@ pub enum TrayEvent<Message> {
 #[non_exhaustive]
 pub struct InteractionEvent {
     pub kind: InteractionKind,
-    pub trigger: InteractionTrigger,
     pub position: Option<PhysicalPosition<i32>>,
     pub area: Option<(PhysicalPosition<i32>, PhysicalSize<i32>)>,
 }
@@ -151,45 +150,6 @@ pub enum InteractionKind {
     PrimaryActivate,
     SecondaryActivate,
     ContextMenu,
-}
-
-/// Detail about how an interaction was triggered.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum InteractionTrigger {
-    Pointer(PointerTrigger),
-    Keyboard,
-    #[default]
-    Unknown,
-}
-
-/// Pointer-specific detail for a tray interaction.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct PointerTrigger {
-    pub button: PointerButton,
-    pub event: PointerEventKind,
-}
-
-/// Pointer button that triggered a tray interaction.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum PointerButton {
-    #[default]
-    Left,
-    Right,
-    Middle,
-    Other(u16),
-}
-
-/// Pointer event kind associated with a tray interaction.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum PointerEventKind {
-    Down,
-    #[default]
-    Up,
-    DoubleClick,
 }
 
 /// A wheel/gesture scroll event over the tray icon.

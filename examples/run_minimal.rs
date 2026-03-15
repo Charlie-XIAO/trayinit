@@ -50,6 +50,8 @@ impl Tray for RunMinimalTray {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let tray = RunMinimalTray {
         enabled: false,
         quit_requested: false,

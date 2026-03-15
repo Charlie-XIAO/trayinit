@@ -37,6 +37,8 @@ impl Tray for EventProbeTray {
 enum Never {}
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let tray = EventProbeTray;
     let handle = tray.spawn().expect("spawn event probe example");
 
@@ -59,8 +61,8 @@ fn main() {
 
 fn log_interaction(interaction: InteractionEvent) {
     println!(
-        "interaction: kind={:?} trigger={:?} position={:?} area={:?}",
-        interaction.kind, interaction.trigger, interaction.position, interaction.area
+        "interaction: kind={:?} position={:?} area={:?}",
+        interaction.kind, interaction.position, interaction.area
     );
 }
 

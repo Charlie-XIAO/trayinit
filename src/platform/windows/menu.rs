@@ -542,11 +542,13 @@ fn set_menu_type_by_position(parent: HMENU, position: u32, state: CommandState) 
     }
 }
 
-pub fn show_popup_menu(hwnd: HWND, menu: HMENU) -> Option<u32> {
+pub fn show_popup_menu(hwnd: HWND, menu: HMENU, anchor: Option<POINT>) -> Option<u32> {
     // Reference: muda/src/platform_impl/windows/mod.rs::show_context_menu.
-    let mut point = POINT { x: 0, y: 0 };
+    let mut point = anchor.unwrap_or(POINT { x: 0, y: 0 });
     unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point);
+        if anchor.is_none() {
+            windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point);
+        }
         SetForegroundWindow(hwnd);
         let result = TrackPopupMenu(
             menu,

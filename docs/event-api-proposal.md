@@ -1,103 +1,18 @@
 # Event API Proposal
 
-This note proposes how `trayinit` should expose tray interaction events without
-throwing away important platform detail.
+This note records the direction for tray interaction events in `trayinit`.
 
-The current API is too lossy:
+The core decision is to keep the public API semantic-first:
 
-- `SecondaryActivate` conflates at least right-click and middle-click on Windows.
-- double-click has no clean representation.
-- `Scroll` exists, but the overall event model does not clearly describe what is
-  semantic, what is trigger detail, and what is platform-specific.
+- `PrimaryActivate`
+- `SecondaryActivate`
+- `ContextMenu`
+- `Scroll`
 
-The goal is to improve this without copying `tray-icon`'s fully raw event stream
-into the core reactive API.
+and to avoid exposing pointer-vs-keyboard provenance, button lifecycle, or hover
+tracking in the default cross-platform event stream.
 
-## Goals
-
-- Keep one primary event surface for `Tray::event(...)`.
-- Preserve cross-platform semantic meaning: primary activation, secondary
-  activation, context-menu request, scroll.
-- Preserve button and click-phase detail when a backend can report it.
-- Do not invent fake raw detail on platforms that only expose high-level
-  semantics.
-- Keep room for future extensions such as hover or move events without forcing
-  them into the first revision.
-
-## Non-goals
-
-- A full raw pointer event stream in the core API.
-- Perfect parity across all platforms.
-- Promising hover, move, enter, or leave as part of the core tray API today.
-
-Those can be added later if we decide they are important enough and we can do so
-without making the default event story noisy or platform-fragile.
-
-## Current API
-
-Today `trayinit` exposes:
-
-```rust
-pub enum TrayEvent<Message> {
-    Activate(ActivateEvent),
-    SecondaryActivate(ActivateEvent),
-    Scroll(ScrollEvent),
-    Menu(Message),
-}
-```
-
-This loses too much information:
-
-- primary vs secondary is semantic, but not enough for right vs middle
-- click phase is lost
-- double-click is lost
-- context-menu request is implicit instead of explicit
-
-## Reference Behavior
-
-### `tray-icon`
-
-`tray-icon` is intentionally much richer on Windows and macOS:
-
-- Windows:
-  - click `Down` / `Up` for left, right, and middle buttons
-  - `DoubleClick` for left, right, and middle buttons
-  - `Enter`, `Move`, `Leave`
-- macOS:
-  - click `Down` / `Up` for left, right, and middle buttons
-  - `Enter`, `Move`, `Leave`
-  - current implementation does not emit double-click
-- Linux:
-  - no tray icon interaction events at all in the crate's GTK path
-
-Relevant reference files:
-
-- `D:\Projects\probe\tray-icon\src\lib.rs`
-- `D:\Projects\probe\tray-icon\src\platform_impl\windows\mod.rs`
-- `D:\Projects\probe\tray-icon\src\platform_impl\macos\mod.rs`
-
-### `ksni`
-
-`ksni` is semantic rather than raw:
-
-- `activate(x, y)`
-- `secondary_activate(x, y)`
-- `scroll(delta, orientation)`
-
-It does not expose raw button up/down or hover state.
-
-Its D-Bus interface also has a `ContextMenu(x, y)` method in the StatusNotifier
-spec, but `ksni` intentionally does not implement a self-rendered context-menu
-callback there and instead relies on the exported menu model.
-
-Relevant reference files:
-
-- `D:\Projects\probe\ksni\src\lib.rs`
-- `D:\Projects\probe\ksni\src\dbus_interface.rs`
-
-## Proposed Public API
-
-Use one semantic event stream, but attach richer trigger detail when available.
+## Current Public API
 
 ```rust
 #[non_exhaustive]
@@ -110,7 +25,6 @@ pub enum TrayEvent<Message> {
 #[non_exhaustive]
 pub struct InteractionEvent {
     pub kind: InteractionKind,
-    pub trigger: InteractionTrigger,
     pub position: Option<PhysicalPosition<i32>>,
     pub area: Option<(PhysicalPosition<i32>, PhysicalSize<i32>)>,
 }
@@ -123,34 +37,6 @@ pub enum InteractionKind {
 }
 
 #[non_exhaustive]
-pub enum InteractionTrigger {
-    Pointer(PointerTrigger),
-    Keyboard,
-    Unknown,
-}
-
-#[non_exhaustive]
-pub struct PointerTrigger {
-    pub button: PointerButton,
-    pub event: PointerEventKind,
-}
-
-#[non_exhaustive]
-pub enum PointerButton {
-    Left,
-    Right,
-    Middle,
-    Other(u16),
-}
-
-#[non_exhaustive]
-pub enum PointerEventKind {
-    Down,
-    Up,
-    DoubleClick,
-}
-
-#[non_exhaustive]
 pub struct ScrollEvent {
     pub delta: i32,
     pub axis: ScrollAxis,
@@ -159,26 +45,46 @@ pub struct ScrollEvent {
 }
 ```
 
+## Goals
+
+- Keep one primary event surface for `Tray::event(...)`.
+- Preserve the semantic distinctions that matter across platforms.
+- Keep optional geometry data when the backend can report it.
+- Avoid promising event detail that some backends cannot supply reliably.
+- Leave room for future extensions without committing them to the first core API.
+
+## Non-goals
+
+- A full raw pointer event stream in the core API.
+- Perfect parity across all platforms.
+- Hover, move, enter, leave, or button down/up in the default event family.
+- Guaranteed keyboard-vs-pointer provenance in the public API.
+
+Those can be reconsidered later as explicit extensions if they prove valuable.
+
 ## Why This Shape
 
-This keeps the semantic part front and center:
+Most tray applications care about what happened, not about every transport-level
+detail of how the platform reported it.
 
-- most apps care about "what should happen"
-- not about every raw mouse transition
+Examples:
 
-But it still gives richer detail when the backend has it:
+- "primary activate" is useful
+- "open the menu" is useful
+- "alternate activate" is useful
+- "pointer up from the left button, unless it was keyboard-origin on this shell"
+  is usually not useful enough to justify the complexity
 
-- right-click vs middle-click no longer need to collapse into one bucket
-- double-click has a clean place to go
-- keyboard-triggered activation can be represented later
+This matters especially because the backends do not agree:
 
-Most importantly, it avoids having two parallel event systems:
+- Windows can surface mouse-style notifications and some semantic follow-up
+  notifications from the shell.
+- Linux SNI is semantic by design.
+- macOS is centered around status-item button/menu behavior rather than a rich
+  raw callback stream.
 
-- a "semantic" one
-- and a "raw" one
-
-That duplication would make downstream handling awkward, because the same user
-gesture could arrive twice in different forms.
+If the public API is semantic-first, backends can still use lower-level detail
+internally where needed without forcing downstream code to depend on it.
 
 ## Semantics
 
@@ -188,234 +94,234 @@ gesture could arrive twice in different forms.
   - the tray's main action
   - usually left click
 - `SecondaryActivate`
-  - a less important alternate action
-  - semantically distinct from "show the context menu"
-  - usually middle click on SNI
-  - may come from other buttons on other platforms if that is the platform's
-    real behavior
+  - a distinct alternate activation
+  - commonly middle click on platforms that support it
+  - semantically different from opening the menu
 - `ContextMenu`
-  - an explicit request to open or show the tray menu
+  - an explicit request to show the tray menu
   - usually right click
-  - semantically distinct from alternate activation
-  - trigger detail may still report which button caused it
-
-### `InteractionTrigger`
-
-- `Pointer(...)`
-  - the backend knows which pointer button and which pointer event caused the
-    interaction
-- `Keyboard`
-  - the backend knows the interaction came from keyboard navigation or keyboard
-    activation
-- `Unknown`
-  - the backend only has high-level semantic information
-  - do not synthesize fake button or phase information in this case
 
 ### `ScrollEvent`
 
-- `Scroll` stays first-class rather than being folded into `Interaction`
-- `delta` is backend-native integer scroll magnitude
-- `axis` is horizontal or vertical
-- `position` / `area` are optional, same as interaction events
+- `Scroll` stays separate from `Interaction`.
+- `delta` is backend-native integer magnitude for now.
+- `axis` is horizontal or vertical.
+- `position` and `area` are optional geometry hints, same as `InteractionEvent`.
 
-For the first revision, the important property is preserving semantic scroll,
-not trying to normalize every backend into pixels or lines.
+The important point is preserving the semantic event, not prematurely forcing
+all backends into the same scroll unit.
 
 ## Behavioral Rules
 
-### Rule 1: Semantic first, trigger detail second
+### Rule 1: The core stream is semantic
 
-If the backend can say "this was a primary activation caused by right-button up"
-then the event should be:
+The default event stream should answer:
 
-```rust
-TrayEvent::Interaction(InteractionEvent {
-    kind: InteractionKind::PrimaryActivate,
-    trigger: InteractionTrigger::Pointer(PointerTrigger {
-        button: PointerButton::Right,
-        event: PointerEventKind::Up,
-    }),
-    ..
-})
-```
+- what action happened
+- where it happened, if known
 
-If the backend only knows "secondary activate happened", use:
+It should not try to carry every raw platform detail by default.
 
-```rust
-TrayEvent::Interaction(InteractionEvent {
-    kind: InteractionKind::SecondaryActivate,
-    trigger: InteractionTrigger::Unknown,
-    ..
-})
-```
+### Rule 2: Do not invent provenance
 
-### Rule 2: Never invent raw detail
+If the backend cannot reliably tell whether activation came from pointer or
+keyboard, the public event should remain semantic.
 
-Do not guess:
-
-- left click
-- button up
-- double click
-
-when the platform API did not actually report it.
+This is now the policy for Windows, because actual shell callback sequences can
+make keyboard and pointer activation indistinguishable from tray callbacks alone
+on some systems.
 
 ### Rule 3: Do not synthesize context-menu events just for internal policy
 
-Emit `ContextMenu` when the backend surfaces a semantic context-menu request
-that application code may care about.
+Emit `ContextMenu` when the backend surfaces a real semantic menu request that
+application code may care about.
 
-If the library has already decided to open its own declarative menu internally,
-and there is no application-side decision left to make, it is reasonable to
-emit no app-visible interaction event at all.
+If `trayinit` simply opens its own declarative menu as an internal policy
+decision, it does not need to emit an extra synthetic event.
 
-In particular, `menu_on_primary_click()` should not force `trayinit` to invent
-a synthetic `ContextMenu` event if the library is simply opening its own menu.
+### Rule 4: One semantic activation per gesture
 
-### Rule 4: No noisy hover stream in the first revision
+The core stream should avoid duplicate semantic events for one logical user
+gesture.
 
-Even though Windows and macOS can support enter / move / leave, they should not
-be part of the first core proposal.
+This is why:
 
-Reasons:
+- Windows follow-up notifications such as `NIN_SELECT` and `WM_CONTEXTMENU`
+  should be deduplicated against already-emitted semantic pointer activations
+- double-click needs an explicit policy before it is added to the core stream
 
-- Linux SNI does not expose them
-- they are noisy
-- they are not part of the main tray interaction model most apps need
+### Rule 5: Raw hover and lifecycle detail are future extensions
 
-If we want them later, add them explicitly as a separate extension rather than
-smuggling them into the core API now.
+Do not add these to the core event family yet:
+
+- move
+- enter
+- leave
+- button down
+- button up
+
+They are noisy, platform-skewed, and not required for the main cross-platform
+tray story.
+
+## Reference Behavior
+
+### `tray-icon`
+
+`tray-icon` exposes a much richer raw event stream on Windows and macOS,
+including button down/up, enter, move, leave, and some double-click handling.
+
+That is a useful implementation reference, but it is not the right public shape
+for `trayinit`'s primary event API.
+
+Relevant reference files:
+
+- `D:\Projects\probe\tray-icon\src\lib.rs`
+- `D:\Projects\probe\tray-icon\src\platform_impl\windows\mod.rs`
+- `D:\Projects\probe\tray-icon\src\platform_impl\macos\mod.rs`
+
+### `ksni`
+
+`ksni` is the closer reference for public API shape:
+
+- `activate(x, y)`
+- `secondary_activate(x, y)`
+- `scroll(delta, orientation)`
+
+It is semantic rather than raw, which aligns with the direction here.
+
+Relevant reference files:
+
+- `D:\Projects\probe\ksni\src\lib.rs`
+- `D:\Projects\probe\ksni\src\dbus_interface.rs`
 
 ## Platform Mapping
 
 ### Windows
 
-Likely mapping:
+Current semantic mapping:
 
 - `WM_LBUTTONUP`
   - `PrimaryActivate`
-  - trigger: `Pointer { Left, Up }`
 - `WM_MBUTTONUP`
   - `SecondaryActivate`
-  - trigger: `Pointer { Middle, Up }`
 - `WM_RBUTTONUP`
   - `ContextMenu`
-  - trigger: `Pointer { Right, Up }`
-- `WM_*DBLCLK`
-  - same semantic kind as the platform policy would normally produce
-  - trigger event: `DoubleClick`
+- `NIN_SELECT`
+  - semantic follow-up for primary activation
+  - should be deduplicated if an equivalent activation was already emitted
+- `WM_CONTEXTMENU`
+  - semantic follow-up for menu request
+  - should be deduplicated if an equivalent menu request was already emitted
+- `NIN_KEYSELECT`
+  - may represent semantic primary activation on some systems
 
-Notes:
+Important note:
 
-- `tray-icon` already demonstrates that Windows tray callbacks can surface left,
-  right, and middle click up/down as well as double-click.
-- Whether keyboard-triggered tray activation should be exposed depends on a
-  later Windows refinement around notification icon versioning and callback
-  messages such as `NIN_SELECT` / `NIN_KEYSELECT`. It should not block this API
-  proposal.
-- Scroll is not currently proven in our Windows backend path and should remain
-  unsupported until verified.
+- Even with `NOTIFYICON_VERSION_4`, Windows shell behavior can still report
+  keyboard-origin tray actions through the same left/right-style callback
+  sequence as mouse input, followed by semantic shell notifications.
+- Because that provenance is not reliable enough for the public API, the core
+  `InteractionEvent` does not expose keyboard-vs-pointer detail.
+
+Scroll is not implemented yet in the Windows backend and should remain
+unsupported until verified.
 
 ### macOS
 
-Likely mapping:
+Expected semantic mapping:
 
-- left / right / middle mouse down / up can be observed from the status item
-  target view
-- current `tray-icon` implementation shows that enter / move / leave are also
-  possible via tracking areas
+- primary status-item action
+  - `PrimaryActivate`
+- alternate activation when the platform clearly surfaces one
+  - `SecondaryActivate`
+- menu request
+  - `ContextMenu`
 
 Notes:
 
-- The status-item API is fundamentally button/menu-oriented rather than a
-  general-purpose raw tray callback stream, so macOS should be treated as
-  semantic-first.
-- The reference implementation does not currently emit double-click even though
-  AppKit may make it possible to infer from event data.
-- For the first revision, we should not promise macOS double-click until we
-  verify the behavior in implementation.
-- Scroll is also not yet part of the reference implementation we are following.
+- AppKit status items are fundamentally button/menu-oriented.
+- macOS should be treated as semantic-first.
+- Do not promise double-click or scroll until verified in the backend.
 
 ### Linux SNI / DBus
 
-Likely mapping:
+Expected semantic mapping:
 
 - `Activate(x, y)`
   - `PrimaryActivate`
-  - trigger: `Unknown`
 - `SecondaryActivate(x, y)`
   - `SecondaryActivate`
-  - trigger: `Unknown`
 - `Scroll(delta, orientation)`
   - `Scroll`
-- context-menu open:
+- context-menu behavior
   - often host-owned rather than application-owned
-  - may not result in any explicit callback at all
+  - may not yield an explicit callback at all
 
-Notes:
+This is the clearest justification for keeping the public API semantic-first.
 
-- This is the clearest example of why the trigger must be optional and why we
-  should not synthesize fake button information.
-- It is also why hover and move should not be part of the first core API.
+## Double-click
+
+Double-click is intentionally not part of the current core semantic API.
+
+The issue is policy, not low-level capability. On platforms like Windows, a
+double-click is reported on top of normal click sequencing, so a naive public
+API tends to create one of two bad outcomes:
+
+- emit a normal activation and then a second double-click semantic event
+- delay the single-click semantic action until the double-click timeout expires
+
+Until there is a clear policy that does not make the main activation path worse,
+double-click should stay out of the core semantic event family.
+
+## Future Extensions
+
+If we later decide the extra detail is worth exposing, the clean path is a
+separate extension or separate event family for raw backend detail, such as:
+
+- move
+- enter
+- leave
+- button down/up
+- double-click as a raw transport event
+- keyboard/pointer provenance when it is actually reliable
+
+That keeps the main `TrayEvent` story simple and cross-platform.
 
 ## Implementation Notes
 
 ### `trayinit` Windows backend
 
-Current `trayinit` already receives the callback messages needed to improve the
-event model:
+The Windows backend already has the architecture needed for the semantic model:
 
-- `WM_LBUTTONUP`
-- `WM_RBUTTONUP`
-- `WM_MBUTTONUP`
-- `WM_*DBLCLK`
+- semantic click mapping
+- geometry extraction
+- deduplication of shell follow-up notifications
 
-So the Windows backend can move to the proposed `InteractionEvent` shape
-without architectural changes.
+The key policy is:
+
+- emit the first semantic activation/menu request
+- suppress equivalent follow-up semantic notifications from the shell
+- do not try to expose provenance the shell cannot report consistently
 
 ### `menu_on_primary_click`
 
-Today `trayinit` uses policy directly in the Windows backend:
+When `trayinit` internally decides to open its own declarative menu in response
+to a primary interaction, that internal menu-opening policy does not need to
+generate a public `ContextMenu` event by itself.
 
-- left click either opens the menu or emits `Activate`
-- right click either opens the menu or emits `SecondaryActivate`
+### `Scroll`
 
-Under the proposed model, that becomes clearer:
+`Scroll` stays in the public API even though the Windows and macOS backends do
+not implement it yet, because Linux SNI has a native semantic scroll surface and
+it is a good fit for the cross-platform model.
 
-- backend-originated menu request: `ContextMenu`
-- tray main action: `PrimaryActivate`
-- less important alternate action: `SecondaryActivate`
+## Recommended Next Steps
 
-But when `trayinit` itself opens its own declarative menu as a purely internal
-policy choice, it does not need to synthesize `ContextMenu` for application
-code.
-
-### Future raw extensions
-
-If we later want richer raw events such as:
-
-- enter
-- move
-- leave
-- raw button down / up independent of semantic action
-
-the clean path is to add them as a separate extension or separate event family,
-not to overload the first semantic revision.
-
-## Recommended Next Step
-
-1. Replace the current `Activate` / `SecondaryActivate` variants with a single
-   `Interaction(InteractionEvent)` variant.
-2. Keep `Menu(Message)` and `Scroll(ScrollEvent)`.
-3. Update Windows to emit:
-   - `PrimaryActivate`
-   - `SecondaryActivate`
-   - `ContextMenu`
-   with pointer trigger detail.
-4. When Linux SNI lands, map its semantic callbacks to the same
-   `InteractionEvent` shape using `InteractionTrigger::Unknown`.
-5. Mark the public interaction enums and structs as `#[non_exhaustive]`.
-6. Defer hover / move / leave until we have evidence that they are worth the
-   cross-platform complexity.
+1. Keep the current public semantic API as-is.
+2. Implement `Scroll` where the platform genuinely supports it.
+3. Leave double-click out of the core stream until there is an explicit policy.
+4. Consider a future raw-event extension only if real downstream use cases
+   justify the extra complexity.
 
 ## Sources
 

@@ -56,6 +56,8 @@ impl Tray for MinimalTray {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let keep_running = Arc::new(AtomicBool::new(true));
     let tray = MinimalTray {
         enabled: false,

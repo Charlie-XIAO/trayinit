@@ -142,6 +142,8 @@ impl Tray for ShowcaseTray {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let keep_running = Arc::new(AtomicBool::new(true));
     let tray = ShowcaseTray {
         ticks_enabled: true,

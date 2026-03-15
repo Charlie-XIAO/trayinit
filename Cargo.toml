@@ -3,13 +3,19 @@ name = "trayinit"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+tracing = ["dep:tracing"]
+
 [dependencies]
 once_cell = "1.21"
 dpi = "0.1"
 keyboard-types = "0.7"
 thiserror = "2"
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 winit = "0.30"
 
 [target."cfg(target_os = \"windows\")".dependencies.windows-sys]
