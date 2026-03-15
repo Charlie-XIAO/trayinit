@@ -100,12 +100,14 @@ Relevant reference files:
 Use one semantic event stream, but attach richer trigger detail when available.
 
 ```rust
+#[non_exhaustive]
 pub enum TrayEvent<Message> {
     Menu(Message),
     Interaction(InteractionEvent),
     Scroll(ScrollEvent),
 }
 
+#[non_exhaustive]
 pub struct InteractionEvent {
     pub kind: InteractionKind,
     pub trigger: InteractionTrigger,
@@ -113,23 +115,27 @@ pub struct InteractionEvent {
     pub area: Option<(PhysicalPosition<i32>, PhysicalSize<i32>)>,
 }
 
+#[non_exhaustive]
 pub enum InteractionKind {
     PrimaryActivate,
     SecondaryActivate,
     ContextMenu,
 }
 
+#[non_exhaustive]
 pub enum InteractionTrigger {
     Pointer(PointerTrigger),
     Keyboard,
     Unknown,
 }
 
+#[non_exhaustive]
 pub struct PointerTrigger {
     pub button: PointerButton,
-    pub phase: PointerPhase,
+    pub event: PointerEventKind,
 }
 
+#[non_exhaustive]
 pub enum PointerButton {
     Left,
     Right,
@@ -137,12 +143,14 @@ pub enum PointerButton {
     Other(u16),
 }
 
-pub enum PointerPhase {
+#[non_exhaustive]
+pub enum PointerEventKind {
     Down,
     Up,
     DoubleClick,
 }
 
+#[non_exhaustive]
 pub struct ScrollEvent {
     pub delta: i32,
     pub axis: ScrollAxis,
@@ -181,18 +189,20 @@ gesture could arrive twice in different forms.
   - usually left click
 - `SecondaryActivate`
   - a less important alternate action
+  - semantically distinct from "show the context menu"
   - usually middle click on SNI
   - may come from other buttons on other platforms if that is the platform's
     real behavior
 - `ContextMenu`
   - an explicit request to open or show the tray menu
   - usually right click
-  - may also be primary click when `menu_on_primary_click()` is enabled
+  - semantically distinct from alternate activation
+  - trigger detail may still report which button caused it
 
 ### `InteractionTrigger`
 
 - `Pointer(...)`
-  - the backend knows which pointer button and which phase caused the
+  - the backend knows which pointer button and which pointer event caused the
     interaction
 - `Keyboard`
   - the backend knows the interaction came from keyboard navigation or keyboard
@@ -223,7 +233,7 @@ TrayEvent::Interaction(InteractionEvent {
     kind: InteractionKind::PrimaryActivate,
     trigger: InteractionTrigger::Pointer(PointerTrigger {
         button: PointerButton::Right,
-        phase: PointerPhase::Up,
+        event: PointerEventKind::Up,
     }),
     ..
 })
@@ -249,14 +259,17 @@ Do not guess:
 
 when the platform API did not actually report it.
 
-### Rule 3: Menu-opening policy should be observable
+### Rule 3: Do not synthesize context-menu events just for internal policy
 
-If `menu_on_primary_click()` causes a click to open the tray menu instead of
-performing the tray's main action, the emitted semantic event should be
-`ContextMenu`, not `PrimaryActivate`.
+Emit `ContextMenu` when the backend surfaces a semantic context-menu request
+that application code may care about.
 
-This matters because menu-open policy is part of user-visible behavior and
-should not disappear from the event stream.
+If the library has already decided to open its own declarative menu internally,
+and there is no application-side decision left to make, it is reasonable to
+emit no app-visible interaction event at all.
+
+In particular, `menu_on_primary_click()` should not force `trayinit` to invent
+a synthetic `ContextMenu` event if the library is simply opening its own menu.
 
 ### Rule 4: No noisy hover stream in the first revision
 
@@ -289,7 +302,7 @@ Likely mapping:
   - trigger: `Pointer { Right, Up }`
 - `WM_*DBLCLK`
   - same semantic kind as the platform policy would normally produce
-  - trigger phase: `DoubleClick`
+  - trigger event: `DoubleClick`
 
 Notes:
 
@@ -297,7 +310,8 @@ Notes:
   right, and middle click up/down as well as double-click.
 - Whether keyboard-triggered tray activation should be exposed depends on a
   later Windows refinement around notification icon versioning and callback
-  messages. It should not block this API proposal.
+  messages such as `NIN_SELECT` / `NIN_KEYSELECT`. It should not block this API
+  proposal.
 - Scroll is not currently proven in our Windows backend path and should remain
   unsupported until verified.
 
@@ -312,6 +326,9 @@ Likely mapping:
 
 Notes:
 
+- The status-item API is fundamentally button/menu-oriented rather than a
+  general-purpose raw tray callback stream, so macOS should be treated as
+  semantic-first.
 - The reference implementation does not currently emit double-click even though
   AppKit may make it possible to infer from event data.
 - For the first revision, we should not promise macOS double-click until we
@@ -364,9 +381,13 @@ Today `trayinit` uses policy directly in the Windows backend:
 
 Under the proposed model, that becomes clearer:
 
-- menu open request: `ContextMenu`
+- backend-originated menu request: `ContextMenu`
 - tray main action: `PrimaryActivate`
 - less important alternate action: `SecondaryActivate`
+
+But when `trayinit` itself opens its own declarative menu as a purely internal
+policy choice, it does not need to synthesize `ContextMenu` for application
+code.
 
 ### Future raw extensions
 
@@ -392,7 +413,8 @@ not to overload the first semantic revision.
    with pointer trigger detail.
 4. When Linux SNI lands, map its semantic callbacks to the same
    `InteractionEvent` shape using `InteractionTrigger::Unknown`.
-5. Defer hover / move / leave until we have evidence that they are worth the
+5. Mark the public interaction enums and structs as `#[non_exhaustive]`.
+6. Defer hover / move / leave until we have evidence that they are worth the
    cross-platform complexity.
 
 ## Sources
