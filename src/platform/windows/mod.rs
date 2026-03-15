@@ -28,7 +28,8 @@ use self::icon::OwnedIcon;
 use self::menu::RenderedMenu;
 use crate::model::{MenuDiff, NormalizedMenuItem, NormalizedTrayView, diff_menu_items};
 use crate::{
-    ActivateEvent, Builder, ClosedError, Error, Handle, Result, RuntimePreference, Tray, TrayEvent,
+    Builder, ClosedError, Error, Handle, InteractionEvent, InteractionKind, InteractionTrigger,
+    PointerButton, PointerEventKind, PointerTrigger, Result, RuntimePreference, Tray, TrayEvent,
 };
 
 const WM_USER_TRAYICON: u32 = 6002;
@@ -512,11 +513,29 @@ where
         self.maybe_request_shutdown();
     }
 
-    fn activate_event(&self) -> ActivateEvent {
-        ActivateEvent {
+    fn interaction_event(
+        &self,
+        kind: InteractionKind,
+        trigger: InteractionTrigger,
+    ) -> InteractionEvent {
+        InteractionEvent {
+            kind,
+            trigger,
             position: cursor_position(),
             area: get_tray_rect(self.native.internal_id, self.native.hwnd).map(rect_from_raw),
         }
+    }
+
+    fn pointer_interaction_event(
+        &self,
+        kind: InteractionKind,
+        button: PointerButton,
+        event: PointerEventKind,
+    ) -> InteractionEvent {
+        self.interaction_event(
+            kind,
+            InteractionTrigger::Pointer(PointerTrigger { button, event }),
+        )
     }
 
     fn show_menu(&mut self) -> bool {
@@ -598,26 +617,43 @@ where
 
     fn on_tray_message(&mut self, lparam: LPARAM) {
         // Reference: tray-icon/src/platform_impl/windows/mod.rs::tray_proc.
-        // We keep Windows message dispatch here, but translate it into the crate's
-        // higher-level TrayEvent model instead of exposing raw click states publicly.
+        // Windows already distinguishes left/right/middle button callbacks and
+        // double-clicks for notification icons. We preserve that as trigger
+        // detail while still emitting semantic interaction events.
         match lparam as u32 {
             WM_LBUTTONUP => {
                 if self.native.menu_on_primary_click && self.native.menu.is_some() {
                     let _ = self.show_menu();
                 } else {
-                    self.dispatch_event(TrayEvent::Activate(self.activate_event()));
+                    self.dispatch_event(TrayEvent::Interaction(self.pointer_interaction_event(
+                        InteractionKind::PrimaryActivate,
+                        PointerButton::Left,
+                        PointerEventKind::Up,
+                    )));
                 }
             },
             WM_RBUTTONUP => {
                 if self.native.menu.is_some() {
                     let _ = self.show_menu();
                 } else {
-                    self.dispatch_event(TrayEvent::SecondaryActivate(self.activate_event()));
+                    self.dispatch_event(TrayEvent::Interaction(self.pointer_interaction_event(
+                        InteractionKind::ContextMenu,
+                        PointerButton::Right,
+                        PointerEventKind::Up,
+                    )));
                 }
             },
             WM_MBUTTONUP => {
-                self.dispatch_event(TrayEvent::SecondaryActivate(self.activate_event()));
+                self.dispatch_event(TrayEvent::Interaction(self.pointer_interaction_event(
+                    InteractionKind::SecondaryActivate,
+                    PointerButton::Middle,
+                    PointerEventKind::Up,
+                )));
             },
+            // Windows delivers double-click messages in addition to the normal
+            // click sequence. We keep the richer public type, but do not emit
+            // semantic double-click interactions until the backend can suppress
+            // duplicate single-click activation correctly.
             WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_LBUTTONDBLCLK
             | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK => {},
             _ => {},

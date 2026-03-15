@@ -49,7 +49,8 @@ impl Tray for MinimalTray {
             TrayEvent::Menu(Message::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },
-            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
+            TrayEvent::Interaction(_) | TrayEvent::Scroll(_) => {},
+            _ => {},
         }
     }
 }

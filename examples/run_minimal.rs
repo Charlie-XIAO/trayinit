@@ -39,7 +39,8 @@ impl Tray for RunMinimalTray {
             TrayEvent::Menu(Message::Quit) => {
                 self.quit_requested = true;
             },
-            TrayEvent::Activate(_) | TrayEvent::SecondaryActivate(_) | TrayEvent::Scroll(_) => {},
+            TrayEvent::Interaction(_) | TrayEvent::Scroll(_) => {},
+            _ => {},
         }
     }
 

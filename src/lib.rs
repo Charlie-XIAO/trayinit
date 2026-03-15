@@ -10,8 +10,9 @@ pub use dpi;
 pub use crate::error::{ClosedError, Error, IconError, Result};
 pub use crate::icon::Icon;
 pub use crate::tray::{
-    ActivateEvent, Builder, Handle, LinuxOptions, RuntimePreference, ScrollAxis, ScrollEvent, Tray,
-    TrayEvent, TrayMethods, TrayStatus,
+    Builder, Handle, InteractionEvent, InteractionKind, InteractionTrigger, LinuxOptions,
+    PointerButton, PointerEventKind, PointerTrigger, RuntimePreference, ScrollAxis, ScrollEvent,
+    Tray, TrayEvent, TrayMethods, TrayStatus,
 };
 
 #[cfg(target_os = "windows")]

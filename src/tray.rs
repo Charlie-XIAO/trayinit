@@ -126,25 +126,80 @@ pub enum TrayStatus {
 
 /// Event emitted from a tray backend into [`Tray::event`].
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TrayEvent<Message> {
-    Activate(ActivateEvent),
-    SecondaryActivate(ActivateEvent),
-    Scroll(ScrollEvent),
     Menu(Message),
+    Interaction(InteractionEvent),
+    Scroll(ScrollEvent),
 }
 
-/// Activation metadata for tray clicks.
+/// A semantic interaction with the tray icon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct ActivateEvent {
+#[non_exhaustive]
+pub struct InteractionEvent {
+    pub kind: InteractionKind,
+    pub trigger: InteractionTrigger,
     pub position: Option<PhysicalPosition<i32>>,
     pub area: Option<(PhysicalPosition<i32>, PhysicalSize<i32>)>,
 }
 
+/// High-level meaning of a tray interaction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum InteractionKind {
+    #[default]
+    PrimaryActivate,
+    SecondaryActivate,
+    ContextMenu,
+}
+
+/// Detail about how an interaction was triggered.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum InteractionTrigger {
+    Pointer(PointerTrigger),
+    Keyboard,
+    #[default]
+    Unknown,
+}
+
+/// Pointer-specific detail for a tray interaction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct PointerTrigger {
+    pub button: PointerButton,
+    pub event: PointerEventKind,
+}
+
+/// Pointer button that triggered a tray interaction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PointerButton {
+    #[default]
+    Left,
+    Right,
+    Middle,
+    Other(u16),
+}
+
+/// Pointer event kind associated with a tray interaction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PointerEventKind {
+    Down,
+    #[default]
+    Up,
+    DoubleClick,
+}
+
 /// A wheel/gesture scroll event over the tray icon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct ScrollEvent {
     pub delta: i32,
     pub axis: ScrollAxis,
+    pub position: Option<PhysicalPosition<i32>>,
+    pub area: Option<(PhysicalPosition<i32>, PhysicalSize<i32>)>,
 }
 
 /// Scroll axis reported by the backend.
