@@ -231,7 +231,7 @@ where
             std::process::id(),
             INSTANCE_COUNTER.fetch_add(1, Ordering::AcqRel)
         );
-        conn.request_name(&name).await.map_err(zbus_error)?;
+        conn.request_name(&*name).await.map_err(zbus_error)?;
         name
     } else {
         conn.unique_name()
@@ -284,12 +284,12 @@ where
                 match command {
                     Command::Refresh => {
                         if shared.refresh_and_emit(&conn).await? {
-                            let _ = conn.close().await;
+                            let _ = conn.clone().close().await;
                             break;
                         }
                     }
                     Command::Shutdown => {
-                        let _ = conn.close().await;
+                        let _ = conn.clone().close().await;
                         break;
                     }
                 }
@@ -412,7 +412,7 @@ impl<T: Tray> Shared<T> {
 
         let should_exit = self.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.close().await;
+            let _ = conn.clone().close().await;
         }
         Ok(())
     }
@@ -515,17 +515,17 @@ enum Command {
     Shutdown,
 }
 
-pub struct StatusNotifierItem<T>(Arc<Shared<T>>);
+pub struct StatusNotifierItem<T: Tray>(Arc<Shared<T>>);
 
-impl<T> StatusNotifierItem<T> {
+impl<T: Tray> StatusNotifierItem<T> {
     fn new(shared: Arc<Shared<T>>) -> Self {
         Self(shared)
     }
 }
 
-pub struct DbusMenu<T>(Arc<Shared<T>>);
+pub struct DbusMenu<T: Tray>(Arc<Shared<T>>);
 
-impl<T> DbusMenu<T> {
+impl<T: Tray> DbusMenu<T> {
     fn new(shared: Arc<Shared<T>>) -> Self {
         Self(shared)
     }
@@ -540,7 +540,7 @@ trait StatusNotifierWatcher {
     async fn register_status_notifier_item(&self, service: &str) -> zbus::Result<()>;
 
     #[zbus(property)]
-    async fn is_status_notifier_host_registered(&self) -> zbus::Result<bool>;
+    fn is_status_notifier_host_registered(&self) -> zbus::Result<bool>;
 }
 
 #[zbus::interface(name = "org.kde.StatusNotifierItem")]
@@ -576,7 +576,7 @@ where
                 .await
                 .map_err(to_fdo_error)?;
             if should_exit {
-                let _ = conn.close().await;
+                let _ = conn.clone().close().await;
             }
             Ok(())
         }
@@ -610,7 +610,7 @@ where
             .await
             .map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.close().await;
+            let _ = conn.clone().close().await;
         }
         Ok(())
     }
@@ -634,7 +634,7 @@ where
             .await
             .map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.close().await;
+            let _ = conn.clone().close().await;
         }
         Ok(())
     }
@@ -662,7 +662,7 @@ where
             .await
             .map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.close().await;
+            let _ = conn.clone().close().await;
         }
         Ok(())
     }
@@ -944,10 +944,10 @@ where
     ) -> zbus::Result<()>;
 }
 
-async fn emit_snapshot_changes<T: Tray>(
-    conn: &Connection,
-    changes: &SnapshotChanges,
-) -> Result<()> {
+async fn emit_snapshot_changes<T: Tray>(conn: &Connection, changes: &SnapshotChanges) -> Result<()>
+where
+    T::Message: Clone,
+{
     let sni = conn
         .object_server()
         .interface::<_, StatusNotifierItem<T>>(SNI_PATH)
