@@ -1,13 +1,16 @@
+use std::num::NonZeroU32;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use softbuffer::{Context, Surface};
 use trayinit::menu::{Accelerator, CMD_OR_CTRL, CheckItem, Code, MenuItem, StandardItem};
 use trayinit::{Handle, Tray, TrayEvent, TrayMethods};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 #[cfg(target_os = "windows")]
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -69,7 +72,9 @@ impl Tray for WinitTray {
 
 struct App {
     tray: Option<Handle<WinitTray>>,
-    window: Option<Window>,
+    window: Option<Rc<Window>>,
+    surface: Option<Surface<OwnedDisplayHandle, Rc<Window>>>,
+    context: Context<OwnedDisplayHandle>,
     hook_handle: Arc<Mutex<Option<Handle<WinitTray>>>>,
     keep_running: Arc<AtomicBool>,
     ticker_started: bool,
@@ -83,6 +88,11 @@ impl ApplicationHandler for App {
             let window = event_loop
                 .create_window(attributes)
                 .expect("create winit host window");
+            let window = Rc::new(window);
+            let surface =
+                Surface::new(&self.context, Rc::clone(&window)).expect("create softbuffer surface");
+            window.request_redraw();
+            self.surface = Some(surface);
             self.window = Some(window);
         }
 
@@ -191,10 +201,13 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },
-            WindowEvent::RedrawRequested => {
+            WindowEvent::Resized(_) => {
                 if let Some(window) = self.window.as_ref() {
-                    window.pre_present_notify();
+                    window.request_redraw();
                 }
+            },
+            WindowEvent::RedrawRequested => {
+                self.draw_window();
             },
             _ => {},
         }
@@ -229,9 +242,12 @@ fn main() {
     }
 
     let event_loop = event_loop_builder.build().expect("create winit event loop");
+    let context = Context::new(event_loop.owned_display_handle()).expect("create softbuffer");
     let mut app = App {
         tray: None,
         window: None,
+        surface: None,
+        context,
         hook_handle,
         keep_running: Arc::new(AtomicBool::new(true)),
         ticker_started: false,
@@ -242,4 +258,29 @@ fn main() {
 
 fn on_off(value: bool) -> &'static str {
     if value { "on" } else { "off" }
+}
+
+impl App {
+    fn draw_window(&mut self) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let Some(surface) = self.surface.as_mut() else {
+            return;
+        };
+
+        let size = window.inner_size();
+        let width = NonZeroU32::new(size.width.max(1)).expect("non-zero width");
+        let height = NonZeroU32::new(size.height.max(1)).expect("non-zero height");
+
+        window.pre_present_notify();
+
+        surface
+            .resize(width, height)
+            .expect("resize softbuffer surface");
+
+        let mut buffer = surface.buffer_mut().expect("acquire softbuffer buffer");
+        buffer.fill(0xff181818);
+        buffer.present().expect("present softbuffer frame");
+    }
 }
