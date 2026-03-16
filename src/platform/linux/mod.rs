@@ -284,12 +284,10 @@ where
                 match command {
                     Command::Refresh => {
                         if shared.refresh_and_emit(&conn).await? {
-                            let _ = conn.clone().close().await;
                             break;
                         }
                     }
                     Command::Shutdown => {
-                        let _ = conn.clone().close().await;
                         break;
                     }
                 }
@@ -412,7 +410,7 @@ impl<T: Tray> Shared<T> {
 
         let should_exit = self.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.clone().close().await;
+            let _ = self.post_command(Command::Shutdown);
         }
         Ok(())
     }
@@ -573,7 +571,7 @@ where
             });
             let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
             if should_exit {
-                let _ = conn.clone().close().await;
+                let _ = self.0.post_command(Command::Shutdown);
             }
             Ok(())
         }
@@ -601,7 +599,7 @@ where
         });
         let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.clone().close().await;
+            let _ = self.0.post_command(Command::Shutdown);
         }
         Ok(())
     }
@@ -619,7 +617,7 @@ where
         });
         let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.clone().close().await;
+            let _ = self.0.post_command(Command::Shutdown);
         }
         Ok(())
     }
@@ -641,7 +639,7 @@ where
         });
         let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
-            let _ = conn.clone().close().await;
+            let _ = self.0.post_command(Command::Shutdown);
         }
         Ok(())
     }

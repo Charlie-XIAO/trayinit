@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use trayinit::menu::{Accelerator, CMD_OR_CTRL, CheckItem, Code, MenuItem, StandardItem};
 use trayinit::{Handle, Tray, TrayEvent, TrayMethods};
 use winit::application::ApplicationHandler;
+use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 #[cfg(target_os = "windows")]
@@ -82,6 +83,7 @@ impl ApplicationHandler for App {
                 .create_window(
                     WindowAttributes::default()
                         .with_title("trayinit winit accelerator host")
+                        .with_inner_size(LogicalSize::new(720.0, 420.0))
                         .with_visible(true),
                 )
                 .expect("create winit host window");
@@ -153,17 +155,19 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if !self.keep_running.load(Ordering::Relaxed) {
-            #[cfg(target_os = "windows")]
-            if let (Some(tray), Some(window)) = (self.tray.take(), self.window.as_ref()) {
-                let raw = window.window_handle().expect("window handle").as_raw();
-                let RawWindowHandle::Win32(window_handle) = raw else {
-                    panic!("expected Win32 window handle");
-                };
-                unsafe {
-                    let _ = trayinit::windows::unregister_accelerator_window(
-                        &tray,
-                        window_handle.hwnd.get() as _,
-                    );
+            if let Some(tray) = self.tray.take() {
+                #[cfg(target_os = "windows")]
+                if let Some(window) = self.window.as_ref() {
+                    let raw = window.window_handle().expect("window handle").as_raw();
+                    let RawWindowHandle::Win32(window_handle) = raw else {
+                        panic!("expected Win32 window handle");
+                    };
+                    unsafe {
+                        let _ = trayinit::windows::unregister_accelerator_window(
+                            &tray,
+                            window_handle.hwnd.get() as _,
+                        );
+                    }
                 }
                 let _ = tray.shutdown();
             }
@@ -198,8 +202,9 @@ fn main() {
 
     println!("Running winit window tray example.");
     println!("Startup mode: attach() host-integrated tray.");
-    println!("A real winit window is created and registered for tray accelerators.");
+    println!("A real winit window is created as a visible host window.");
     println!("On Windows, Ctrl+Q should activate the tray Quit item while the window is focused.");
+    println!("On Linux, accelerators are exported as menu shortcut metadata only.");
 
     let hook_handle = Arc::new(Mutex::new(None::<Handle<WinitTray>>));
     let mut event_loop_builder = EventLoop::<()>::with_user_event();
