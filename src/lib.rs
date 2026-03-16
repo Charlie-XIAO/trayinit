@@ -31,6 +31,12 @@ pub mod windows {
     /// target. In practice, Windows tray accelerators only work when the app
     /// has a real focusable host window whose incoming messages are passed
     /// here.
+    ///
+    /// Only messages whose `msg.hwnd` exactly matches a previously registered
+    /// host `HWND` are considered. Child windows are not matched implicitly; if
+    /// a framework delivers accelerator-relevant messages to multiple HWNDs,
+    /// either register each one explicitly or perform your own filtering before
+    /// calling this helper.
     pub unsafe fn process_message<T: Tray>(handle: &Handle<T>, msg: *const MSG) -> bool {
         unsafe { handle.process_windows_message(msg) }
     }
@@ -44,6 +50,9 @@ pub mod windows {
     /// This mirrors the Win32 model used by menu libraries such as `muda`:
     /// accelerator translation is tied to a real application window, not the
     /// tray's hidden notification-area helper window.
+    ///
+    /// Registration is exact by `HWND`; child windows are not included
+    /// automatically.
     ///
     /// # Safety
     ///

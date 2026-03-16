@@ -42,7 +42,15 @@ impl<Message: Clone> RenderedMenu<Message> {
             next_command: 1,
             command_map: HashMap::new(),
         };
-        let items = builder.append_items(root, model_items)?;
+        let items = match builder.append_items(root, model_items) {
+            Ok(items) => items,
+            Err(error) => {
+                unsafe {
+                    DestroyMenu(root);
+                }
+                return Err(error);
+            },
+        };
 
         if items.is_empty() {
             unsafe {
@@ -416,15 +424,26 @@ impl<Message: Clone> MenuBuilder<Message> {
             return Err(Error::Os(io::Error::last_os_error()));
         }
 
-        let children = self.append_items(popup, &submenu.children)?;
+        let children = match self.append_items(popup, &submenu.children) {
+            Ok(children) => children,
+            Err(error) => {
+                unsafe {
+                    DestroyMenu(popup);
+                }
+                return Err(error);
+            },
+        };
         let text = encode_wide(submenu.label.as_str());
         let mut flags = MF_POPUP;
         if !submenu.enabled {
             flags |= MF_DISABLED | MF_GRAYED;
         }
 
-        unsafe {
-            AppendMenuW(parent, flags, popup as usize, text.as_ptr());
+        if unsafe { AppendMenuW(parent, flags, popup as usize, text.as_ptr()) } == 0 {
+            unsafe {
+                DestroyMenu(popup);
+            }
+            return Err(Error::Os(io::Error::last_os_error()));
         }
 
         let bitmap = bitmap_from_icon(submenu.icon.as_ref());

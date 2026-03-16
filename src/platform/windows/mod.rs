@@ -11,9 +11,9 @@ use std::{fmt, io, ptr, thread};
 use dpi::{PhysicalPosition, PhysicalSize};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM};
 use windows_sys::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_SELECT,
-    NINF_KEY, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect,
-    Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
+    NIN_SELECT, NINF_KEY, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONIDENTIFIER,
+    Shell_NotifyIconGetRect, Shell_NotifyIconW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CW_USEDEFAULT, ChangeWindowMessageFilterEx, CreateWindowExW, DefWindowProcW,
@@ -568,6 +568,26 @@ where
         }
     }
 
+    fn handle_primary_activate(&mut self, position: Option<PhysicalPosition<i32>>) {
+        if self.native.menu_on_primary_click && self.native.menu.is_some() {
+            let _ = self.show_menu(position);
+        } else {
+            self.dispatch_event(TrayEvent::Interaction(
+                self.interaction_event(InteractionKind::PrimaryActivate, position),
+            ));
+        }
+    }
+
+    fn handle_context_menu(&mut self, position: Option<PhysicalPosition<i32>>) {
+        if self.native.menu.is_some() {
+            let _ = self.show_menu(position);
+        } else {
+            self.dispatch_event(TrayEvent::Interaction(
+                self.interaction_event(InteractionKind::ContextMenu, position),
+            ));
+        }
+    }
+
     fn maybe_request_shutdown(&self) {
         if self.shared.should_exit() {
             let _ = self.shared.post_close();
@@ -628,31 +648,17 @@ where
         match notification {
             NIN_KEYSELECT => {
                 if pending_followup != Some(ShellFollowup::PrimaryActivate) {
-                    if self.native.menu_on_primary_click && self.native.menu.is_some() {
-                        let _ = self.show_menu(position);
-                    } else {
-                        self.dispatch_event(TrayEvent::Interaction(
-                            self.interaction_event(InteractionKind::PrimaryActivate, position),
-                        ));
-                    }
+                    self.handle_primary_activate(position);
                 }
             },
             NIN_SELECT => {
                 if pending_followup != Some(ShellFollowup::PrimaryActivate) {
-                    self.dispatch_event(TrayEvent::Interaction(
-                        self.interaction_event(InteractionKind::PrimaryActivate, position),
-                    ));
+                    self.handle_primary_activate(position);
                 }
             },
             WM_CONTEXTMENU => {
                 if pending_followup != Some(ShellFollowup::ContextMenu) {
-                    if self.native.menu.is_some() {
-                        let _ = self.show_menu(position);
-                    } else {
-                        self.dispatch_event(TrayEvent::Interaction(
-                            self.interaction_event(InteractionKind::ContextMenu, position),
-                        ));
-                    }
+                    self.handle_context_menu(position);
                 }
             },
             WM_LBUTTONUP => {
@@ -661,25 +667,13 @@ where
                 // already-emitted semantic event so the shell follow-up can be
                 // suppressed instead of producing a duplicate.
                 self.native.pending_shell_followup = Some(ShellFollowup::PrimaryActivate);
-                if self.native.menu_on_primary_click && self.native.menu.is_some() {
-                    let _ = self.show_menu(position);
-                } else {
-                    self.dispatch_event(TrayEvent::Interaction(
-                        self.interaction_event(InteractionKind::PrimaryActivate, position),
-                    ));
-                }
+                self.handle_primary_activate(position);
             },
             WM_RBUTTONUP => {
                 // Explorer can likewise follow WM_RBUTTONUP with WM_CONTEXTMENU
                 // for the same logical gesture.
                 self.native.pending_shell_followup = Some(ShellFollowup::ContextMenu);
-                if self.native.menu.is_some() {
-                    let _ = self.show_menu(position);
-                } else {
-                    self.dispatch_event(TrayEvent::Interaction(
-                        self.interaction_event(InteractionKind::ContextMenu, position),
-                    ));
-                }
+                self.handle_context_menu(position);
             },
             WM_MBUTTONUP => {
                 self.dispatch_event(TrayEvent::Interaction(
@@ -831,6 +825,8 @@ impl<T: Tray> Shared<T> {
         }
 
         let source_hwnd = unsafe { (*msg).hwnd as isize };
+        // Match only explicitly registered host HWNDs. Child/native helper
+        // windows are not treated as implicit accelerator sources.
         if !self.lock_accelerator_windows().contains(&source_hwnd) {
             return false;
         }
@@ -999,9 +995,11 @@ fn notify_icon_data(
     }
 
     if let Some(tooltip) = tooltip {
-        flags |= NIF_TIP;
+        // With NOTIFYICON_VERSION_4, Windows suppresses the standard tray
+        // tooltip unless NIF_SHOWTIP is also set.
+        flags |= NIF_TIP | NIF_SHOWTIP;
         let encoded = util::encode_wide(tooltip);
-        let copy_len = encoded.len().min(tip.len());
+        let copy_len = encoded.len().saturating_sub(1).min(tip.len() - 1);
         tip[..copy_len].copy_from_slice(&encoded[..copy_len]);
     }
 
@@ -1066,4 +1064,20 @@ fn get_tray_rect(id: u32, hwnd: HWND) -> Option<RECT> {
     };
 
     (unsafe { Shell_NotifyIconGetRect(&identifier, &mut rect) } == 0).then_some(rect)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ptr;
+
+    use super::notify_icon_data;
+
+    #[test]
+    fn tooltip_truncation_keeps_trailing_null() {
+        let tooltip = "a".repeat(256);
+        let icon_data = notify_icon_data(ptr::null_mut(), 1, None, Some(&tooltip));
+
+        assert_eq!(icon_data.szTip[127], 0);
+        assert_eq!(icon_data.szTip[126], b'a' as u16);
+    }
 }
