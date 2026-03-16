@@ -27,6 +27,7 @@ impl<Message> NormalizedTrayView<Message> {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuDiff<Message> {
     None,
@@ -34,6 +35,7 @@ pub enum MenuDiff<Message> {
     Rebuild,
 }
 
+#[cfg(any(target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuPatch<Message> {
     Command {
@@ -46,9 +48,11 @@ pub enum MenuPatch<Message> {
     },
 }
 
+#[cfg(any(target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MenuPath(Vec<usize>);
 
+#[cfg(any(target_os = "windows", test))]
 impl MenuPath {
     pub fn new(segments: Vec<usize>) -> Self {
         Self(segments)
@@ -187,6 +191,7 @@ fn compact_menu_items<Message>(
     compacted
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub fn diff_menu_items<Message: Clone>(
     old: &[NormalizedMenuItem<Message>],
     new: &[NormalizedMenuItem<Message>],
@@ -206,6 +211,7 @@ pub fn diff_menu_items<Message: Clone>(
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn has_same_shape<Message>(
     old: &[NormalizedMenuItem<Message>],
     new: &[NormalizedMenuItem<Message>],
@@ -226,6 +232,7 @@ fn has_same_shape<Message>(
     })
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn collect_menu_patches<Message: Clone>(
     old: &[NormalizedMenuItem<Message>],
     new: &[NormalizedMenuItem<Message>],
