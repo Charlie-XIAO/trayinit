@@ -14,7 +14,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 use zbus::fdo::DBusProxy;
 use zbus::names::InterfaceName;
 use zbus::object_server::SignalEmitter;
-use zbus::zvariant::{ObjectPath, Str, Type, Value};
+use zbus::zvariant::{ObjectPath, Type, Value};
 use zbus::{Connection, connection};
 
 use self::menu::{Layout, MenuSnapshot, message_at_path};
@@ -379,20 +379,20 @@ impl<T: Tray> Shared<T> {
         Ok(changes.should_exit)
     }
 
-    async fn dispatch_interaction(
-        &self,
-        conn: &Connection,
-        event: TrayEvent<T::Message>,
-    ) -> Result<bool>
+    fn apply_interaction(&self, event: InteractionEvent)
     where
         T::Message: Clone,
     {
-        {
-            let mut state = self.lock_state();
-            state.tray.event(event);
-        }
+        let mut state = self.lock_state();
+        state.tray.event(TrayEvent::Interaction(event));
+    }
 
-        self.refresh_and_emit(conn).await
+    fn apply_scroll(&self, event: ScrollEvent)
+    where
+        T::Message: Clone,
+    {
+        let mut state = self.lock_state();
+        state.tray.event(TrayEvent::Scroll(event));
     }
 
     async fn dispatch_menu_path(&self, conn: &Connection, path: &[usize]) -> zbus::fdo::Result<()>
@@ -563,18 +563,12 @@ where
         if has_menu {
             Err(zbus::fdo::Error::UnknownMethod("menu".into()))
         } else {
-            let should_exit = self
-                .0
-                .dispatch_interaction(
-                    conn,
-                    TrayEvent::Interaction(InteractionEvent {
-                        kind: InteractionKind::ContextMenu,
-                        position: Some(PhysicalPosition::new(x, y)),
-                        area: None,
-                    }),
-                )
-                .await
-                .map_err(to_fdo_error)?;
+            self.0.apply_interaction(InteractionEvent {
+                kind: InteractionKind::ContextMenu,
+                position: Some(PhysicalPosition::new(x, y)),
+                area: None,
+            });
+            let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
             if should_exit {
                 let _ = conn.clone().close().await;
             }
@@ -597,18 +591,12 @@ where
             return Err(zbus::fdo::Error::UnknownMethod("ItemIsMenu".into()));
         }
 
-        let should_exit = self
-            .0
-            .dispatch_interaction(
-                conn,
-                TrayEvent::Interaction(InteractionEvent {
-                    kind: InteractionKind::PrimaryActivate,
-                    position: Some(PhysicalPosition::new(x, y)),
-                    area: None,
-                }),
-            )
-            .await
-            .map_err(to_fdo_error)?;
+        self.0.apply_interaction(InteractionEvent {
+            kind: InteractionKind::PrimaryActivate,
+            position: Some(PhysicalPosition::new(x, y)),
+            area: None,
+        });
+        let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
             let _ = conn.clone().close().await;
         }
@@ -621,18 +609,12 @@ where
         x: i32,
         y: i32,
     ) -> zbus::fdo::Result<()> {
-        let should_exit = self
-            .0
-            .dispatch_interaction(
-                conn,
-                TrayEvent::Interaction(InteractionEvent {
-                    kind: InteractionKind::SecondaryActivate,
-                    position: Some(PhysicalPosition::new(x, y)),
-                    area: None,
-                }),
-            )
-            .await
-            .map_err(to_fdo_error)?;
+        self.0.apply_interaction(InteractionEvent {
+            kind: InteractionKind::SecondaryActivate,
+            position: Some(PhysicalPosition::new(x, y)),
+            area: None,
+        });
+        let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
             let _ = conn.clone().close().await;
         }
@@ -645,22 +627,16 @@ where
         delta: i32,
         orientation: Orientation,
     ) -> zbus::fdo::Result<()> {
-        let should_exit = self
-            .0
-            .dispatch_interaction(
-                conn,
-                TrayEvent::Scroll(ScrollEvent {
-                    delta,
-                    axis: match orientation {
-                        Orientation::Horizontal => ScrollAxis::Horizontal,
-                        Orientation::Vertical => ScrollAxis::Vertical,
-                    },
-                    position: None,
-                    area: None,
-                }),
-            )
-            .await
-            .map_err(to_fdo_error)?;
+        self.0.apply_scroll(ScrollEvent {
+            delta,
+            axis: match orientation {
+                Orientation::Horizontal => ScrollAxis::Horizontal,
+                Orientation::Vertical => ScrollAxis::Vertical,
+            },
+            position: None,
+            area: None,
+        });
+        let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
         if should_exit {
             let _ = conn.clone().close().await;
         }
