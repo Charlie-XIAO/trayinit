@@ -12,7 +12,7 @@ pub struct MenuSnapshot {
     entries: Vec<MenuEntry>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct MenuDiff {
     pub updated_props: Vec<(usize, HashMap<String, OwnedValue>)>,
     pub removed_props: Vec<(usize, Vec<String>)>,
