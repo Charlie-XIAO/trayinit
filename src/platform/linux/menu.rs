@@ -12,6 +12,13 @@ pub struct MenuSnapshot {
     entries: Vec<MenuEntry>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MenuDiff {
+    pub updated_props: Vec<(usize, HashMap<String, OwnedValue>)>,
+    pub removed_props: Vec<(usize, Vec<String>)>,
+    pub layout_changed: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuEntry {
     kind: MenuEntryKind,
@@ -68,6 +75,42 @@ impl MenuSnapshot {
 
     pub fn entry_count(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn diff(&self, other: &Self) -> MenuDiff {
+        if self.root_children != other.root_children || self.entries.len() != other.entries.len() {
+            return MenuDiff {
+                layout_changed: true,
+                ..MenuDiff::default()
+            };
+        }
+
+        let mut updated_props = Vec::new();
+        let mut removed_props = Vec::new();
+
+        for (index, (old, new)) in self.entries.iter().zip(other.entries.iter()).enumerate() {
+            if old.children != new.children {
+                return MenuDiff {
+                    layout_changed: true,
+                    ..MenuDiff::default()
+                };
+            }
+
+            if let Some((updated, removed)) = old.diff(new) {
+                if !updated.is_empty() {
+                    updated_props.push((index, updated));
+                }
+                if !removed.is_empty() {
+                    removed_props.push((index, removed));
+                }
+            }
+        }
+
+        MenuDiff {
+            updated_props,
+            removed_props,
+            layout_changed: false,
+        }
     }
 
     pub fn message_path_for_id(&self, id_offset: i32, id: i32) -> Option<&[usize]> {
@@ -158,6 +201,82 @@ impl MenuSnapshot {
 }
 
 impl MenuEntry {
+    fn diff(&self, other: &Self) -> Option<(HashMap<String, OwnedValue>, Vec<String>)> {
+        let default = Self::default();
+        let mut updated_props = HashMap::new();
+        let mut removed_props = Vec::new();
+
+        if self.kind != other.kind {
+            if other.kind == default.kind {
+                removed_props.push("type".into());
+            } else {
+                updated_props.insert("type".into(), other.kind.into());
+            }
+        }
+
+        if self.label != other.label {
+            if other.label == default.label {
+                removed_props.push("label".into());
+            } else {
+                updated_props.insert(
+                    "label".into(),
+                    OwnedValue::from(Str::from(other.label.clone())),
+                );
+            }
+        }
+
+        if self.enabled != other.enabled {
+            if other.enabled == default.enabled {
+                removed_props.push("enabled".into());
+            } else {
+                updated_props.insert("enabled".into(), other.enabled.into());
+            }
+        }
+
+        if self.visible != other.visible {
+            if other.visible == default.visible {
+                removed_props.push("visible".into());
+            } else {
+                updated_props.insert("visible".into(), other.visible.into());
+            }
+        }
+
+        if self.shortcut != other.shortcut {
+            if other.shortcut == default.shortcut {
+                removed_props.push("shortcut".into());
+            } else {
+                updated_props.insert(
+                    "shortcut".into(),
+                    Value::from(other.shortcut.clone())
+                        .try_into()
+                        .expect("shortcut should convert into an owned D-Bus value"),
+                );
+            }
+        }
+
+        if self.toggle_type != other.toggle_type {
+            if other.toggle_type == default.toggle_type {
+                removed_props.push("toggle-type".into());
+            } else {
+                updated_props.insert("toggle-type".into(), other.toggle_type.into());
+            }
+        }
+
+        if self.toggle_state != other.toggle_state {
+            if other.toggle_state == default.toggle_state {
+                removed_props.push("toggle-state".into());
+            } else {
+                updated_props.insert("toggle-state".into(), i32::from(other.toggle_state).into());
+            }
+        }
+
+        if updated_props.is_empty() && removed_props.is_empty() {
+            None
+        } else {
+            Some((updated_props, removed_props))
+        }
+    }
+
     fn to_dbus_map(&self, property_names: &[String]) -> HashMap<String, OwnedValue> {
         let mut properties = HashMap::new();
 
@@ -221,6 +340,51 @@ impl MenuEntry {
         }
 
         properties
+    }
+}
+
+impl Default for MenuEntry {
+    fn default() -> Self {
+        Self {
+            kind: MenuEntryKind::Standard,
+            label: String::new(),
+            enabled: true,
+            visible: true,
+            shortcut: Vec::new(),
+            toggle_type: ToggleType::None,
+            toggle_state: ToggleState::Indeterminate,
+            children: Vec::new(),
+            path: None,
+        }
+    }
+}
+
+impl From<MenuEntryKind> for OwnedValue {
+    fn from(value: MenuEntryKind) -> Self {
+        match value {
+            MenuEntryKind::Standard => OwnedValue::from(Str::from_static("standard")),
+            MenuEntryKind::Separator => OwnedValue::from(Str::from_static("separator")),
+        }
+    }
+}
+
+impl From<ToggleType> for OwnedValue {
+    fn from(value: ToggleType) -> Self {
+        match value {
+            ToggleType::Checkmark => OwnedValue::from(Str::from_static("checkmark")),
+            ToggleType::Radio => OwnedValue::from(Str::from_static("radio")),
+            ToggleType::None => OwnedValue::from(Str::from_static("")),
+        }
+    }
+}
+
+impl From<ToggleState> for i32 {
+    fn from(value: ToggleState) -> Self {
+        match value {
+            ToggleState::Off => 0,
+            ToggleState::On => 1,
+            ToggleState::Indeterminate => -1,
+        }
     }
 }
 

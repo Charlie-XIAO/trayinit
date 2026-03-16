@@ -435,8 +435,9 @@ where
     fn refresh_snapshot(&mut self) -> SnapshotChanges {
         let old = self.snapshot.clone();
         let mut next = Snapshot::from_tray(&self.tray, old.menu_revision, old.menu_id_offset);
+        let menu_diff = old.menu.diff(&next.menu);
 
-        if old.menu != next.menu {
+        if menu_diff.layout_changed {
             next.menu_revision = old.menu_revision.saturating_add(1);
             next.menu_id_offset = old
                 .menu_id_offset
@@ -451,6 +452,7 @@ where
             old,
             new: next,
             should_exit,
+            menu_diff,
         }
     }
 }
@@ -507,6 +509,7 @@ struct SnapshotChanges {
     old: Snapshot,
     new: Snapshot,
     should_exit: bool,
+    menu_diff: menu::MenuDiff,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -983,13 +986,53 @@ where
         .await
         .map_err(zbus_error)?;
     }
-    if changes.old.menu != changes.new.menu {
+
+    if changes.menu_diff.layout_changed {
         DbusMenu::<T>::layout_updated(menu.signal_emitter(), changes.new.menu_revision, 0)
             .await
             .map_err(zbus_error)?;
+    } else if !changes.menu_diff.updated_props.is_empty()
+        || !changes.menu_diff.removed_props.is_empty()
+    {
+        let updated_props = changes
+            .menu_diff
+            .updated_props
+            .iter()
+            .map(|(index, properties)| {
+                (
+                    menu_item_id(changes.new.menu_id_offset, *index),
+                    properties.clone(),
+                )
+            })
+            .collect();
+        let removed_props = changes
+            .menu_diff
+            .removed_props
+            .iter()
+            .map(|(index, properties)| {
+                (
+                    menu_item_id(changes.new.menu_id_offset, *index),
+                    properties.clone(),
+                )
+            })
+            .collect();
+        DbusMenu::<T>::items_properties_updated(
+            menu.signal_emitter(),
+            updated_props,
+            removed_props,
+        )
+        .await
+        .map_err(zbus_error)?;
     }
 
     Ok(())
+}
+
+fn menu_item_id(id_offset: i32, index: usize) -> i32 {
+    id_offset
+        .checked_add(index as i32)
+        .and_then(|value| value.checked_add(1))
+        .expect("menu item id should not overflow")
 }
 
 fn status_from_view(visible: bool, status: TrayStatus) -> Status {
