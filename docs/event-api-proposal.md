@@ -259,6 +259,14 @@ Expected semantic mapping:
 
 This is the clearest justification for keeping the public API semantic-first.
 
+Observed caveats from Ubuntu/GNOME-class hosts:
+
+- single left/right click may not surface as explicit application callbacks
+- primary activation may be exposed only through host-specific gestures such as
+  double click
+- tooltip visibility is host-dependent and should not be treated as guaranteed
+- geometry usually has `position` but not `area`
+
 ## Double-click
 
 Double-click is intentionally not part of the current core semantic API.
@@ -308,6 +316,10 @@ The key policy is:
 When `trayinit` internally decides to open its own declarative menu in response
 to a primary interaction, that internal menu-opening policy does not need to
 generate a public `ContextMenu` event by itself.
+
+On Linux SNI/DBus, `menu_on_primary_click` should be documented as best-effort.
+The host may choose its own primary-click behavior once a menu is exported, and
+some desktops do not make this a reliable dynamic toggle.
 
 ### `Scroll`
 

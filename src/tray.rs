@@ -26,6 +26,10 @@ pub trait Tray: Sized + Send + 'static {
     }
 
     /// Tray tooltip text.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: host-dependent. Some desktops may ignore or delay
+    ///   tooltip presentation entirely.
     fn tooltip(&self) -> Option<String> {
         None
     }
@@ -41,6 +45,11 @@ pub trait Tray: Sized + Send + 'static {
     }
 
     /// Whether primary activation should open the menu.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: best-effort only. Hosts may choose their own primary
+    ///   click behavior when a menu is exported, and some desktops do not
+    ///   surface this as a reliable live toggle.
     fn menu_on_primary_click(&self) -> bool {
         false
     }

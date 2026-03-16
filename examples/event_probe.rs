@@ -44,13 +44,17 @@ fn main() {
 
     println!("Running event probe example.");
     println!("This example intentionally has no tray menu.");
-    println!("That keeps right click observable as InteractionKind::ContextMenu.");
-    println!("Current Windows backend support to probe:");
-    println!("- left click -> PrimaryActivate");
-    println!("- middle click -> SecondaryActivate");
-    println!("- right click -> ContextMenu");
-    println!("- double-click shape exists in the API, but is not emitted yet");
-    println!("- scroll shape exists in the API, but is not emitted on Windows yet");
+    println!("That can keep right click observable as InteractionKind::ContextMenu,");
+    println!("but actual click behavior is platform and host dependent.");
+    println!("Useful things to probe:");
+    println!("- primary activation");
+    println!("- secondary activation");
+    println!("- context-menu requests");
+    println!("- scroll");
+    println!("Notes:");
+    println!("- Linux hosts may not emit single-click left/right interactions explicitly.");
+    println!("- Linux tray geometry often has position only and no area.");
+    println!("- Double-click is not part of the current core event API.");
     println!("Press Enter in this terminal to shut the tray down.");
 
     let mut line = String::new();
