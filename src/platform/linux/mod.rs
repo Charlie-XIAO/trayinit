@@ -397,15 +397,26 @@ impl<T: Tray> Shared<T> {
     where
         T::Message: Clone,
     {
-        {
+        let Some(message) = ({
             let mut state = self.lock_state();
             let current_menu = NormalizedTrayView::from_tray(&state.tray).menu;
-            let Some(message) = message_at_path(&current_menu, path) else {
-                return Err(zbus::fdo::Error::InvalidArgs(
-                    "menu item no longer exists".into(),
-                ));
-            };
-            state.tray.event(TrayEvent::Menu(message));
+            match message_at_path(&current_menu, path) {
+                Some(message) => {
+                    if let Some(message) = message.as_ref() {
+                        state.tray.event(TrayEvent::Menu(message.clone()));
+                    }
+                    Some(message)
+                },
+                None => None,
+            }
+        }) else {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "menu item no longer exists".into(),
+            ));
+        };
+
+        if message.is_none() {
+            return Ok(());
         }
 
         let should_exit = self.refresh_and_emit(conn).await.map_err(to_fdo_error)?;

@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use png::{ColorType, Decoder, Transformations};
-use trayinit::menu::{MenuItem, StandardItem, Submenu};
+use trayinit::menu::{MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
 use trayinit::{Icon, Tray, TrayEvent, TrayMethods};
 
 #[derive(Debug, Copy, Clone)]
@@ -14,10 +14,6 @@ enum Message {
     TrayCool,
     TrayAsset,
     TrayNamed,
-    MenuWarm,
-    MenuCool,
-    MenuAsset,
-    MenuNamed,
     Quit,
 }
 
@@ -71,30 +67,33 @@ impl Tray for IconsTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self::Message>> {
+        let selected_tray_icon = match self.tray_icon {
+            TrayIconKind::Warm => 0,
+            TrayIconKind::Cool => 1,
+            TrayIconKind::Asset => 2,
+            TrayIconKind::Named => 3,
+        };
+
         vec![
-            StandardItem::new("Tray icon: Warm", Message::TrayWarm)
-                .with_icon(make_menu_icon(0xD7, 0xB7, 0x4A))
-                .into(),
-            StandardItem::new("Tray icon: Cool", Message::TrayCool)
-                .with_icon(make_menu_icon(0x66, 0x8F, 0xD8))
-                .into(),
-            StandardItem::new("Tray icon: Asset PNG", Message::TrayAsset)
-                .with_icon(asset_icon())
-                .into(),
-            StandardItem::new("Tray icon: Theme name (Linux)", Message::TrayNamed)
-                .with_icon_name("folder")
-                .into(),
+            RadioGroup::new(vec![
+                RadioItem::new("Tray icon: Warm", Message::TrayWarm),
+                RadioItem::new("Tray icon: Cool", Message::TrayCool),
+                RadioItem::new("Tray icon: Asset PNG", Message::TrayAsset),
+                RadioItem::new("Tray icon: Theme name (Linux)", Message::TrayNamed),
+            ])
+            .with_selected(selected_tray_icon)
+            .into(),
             MenuItem::Separator,
-            StandardItem::new("Menu icon: Warm", Message::MenuWarm)
+            StandardItem::without_message("Menu icon: Warm")
                 .with_icon(make_menu_icon(0xD7, 0xB7, 0x4A))
                 .into(),
-            StandardItem::new("Menu icon: Cool", Message::MenuCool)
+            StandardItem::without_message("Menu icon: Cool")
                 .with_icon(make_menu_icon(0x66, 0x8F, 0xD8))
                 .into(),
-            StandardItem::new("Menu icon: Asset PNG", Message::MenuAsset)
+            StandardItem::without_message("Menu icon: Asset PNG")
                 .with_icon(asset_icon())
                 .into(),
-            StandardItem::new("Menu icon: Theme name (Linux)", Message::MenuNamed)
+            StandardItem::without_message("Menu icon: Theme name (Linux)")
                 .with_icon_name("document-open")
                 .into(),
             MenuItem::Submenu(
@@ -125,9 +124,6 @@ impl Tray for IconsTray {
             TrayEvent::Menu(Message::TrayNamed) => {
                 self.tray_icon = TrayIconKind::Named;
             },
-            TrayEvent::Menu(
-                Message::MenuWarm | Message::MenuCool | Message::MenuAsset | Message::MenuNamed,
-            ) => {},
             TrayEvent::Menu(Message::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },

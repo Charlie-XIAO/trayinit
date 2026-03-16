@@ -547,7 +547,7 @@ fn submenu_entry<Message>(submenu: &NormalizedSubmenu<Message>) -> MenuEntry {
 pub fn message_at_path<Message: Clone>(
     items: &[NormalizedMenuItem<Message>],
     path: &[usize],
-) -> Option<Message> {
+) -> Option<Option<Message>> {
     let (index, rest) = path.split_first()?;
     match items.get(*index)? {
         NormalizedMenuItem::Standard(item)
@@ -686,9 +686,10 @@ mod tests {
                 label: "Open".into(),
                 enabled: true,
                 icon: Some(icon.clone()),
+                icon_name: None,
                 accelerator: None,
                 state: crate::model::CommandState::Standard,
-                message: (),
+                message: Some(()),
             },
         )];
 

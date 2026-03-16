@@ -76,7 +76,7 @@ pub enum NormalizedMenuItem<Message> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NormalizedCommandItem<Message> {
-    pub message: Message,
+    pub message: Option<Message>,
     pub label: String,
     pub enabled: bool,
     pub icon: Option<Icon>,

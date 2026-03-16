@@ -147,7 +147,14 @@ impl<Message: Clone> RenderedMenu<Message> {
         }
 
         node.bitmap = bitmap;
-        self.command_map.insert(command, item.message.clone());
+        match &item.message {
+            Some(message) => {
+                self.command_map.insert(command, message.clone());
+            },
+            None => {
+                self.command_map.remove(&command);
+            },
+        }
         true
     }
 
@@ -224,8 +231,10 @@ impl<Message: Clone> RenderedMenu<Message> {
                     | NormalizedMenuItem::Check(item)
                     | NormalizedMenuItem::Radio(item),
                 ) => {
-                    command_map.insert(*command, item.message.clone());
-                    if item.enabled {
+                    if let Some(message) = &item.message {
+                        command_map.insert(*command, message.clone());
+                    }
+                    if item.enabled && item.message.is_some() {
                         if let Some(accelerator) = item.accelerator.as_ref() {
                             let command = u16::try_from(*command).map_err(|_| {
                                 Error::Unsupported(
@@ -405,7 +414,9 @@ impl<Message: Clone> MenuBuilder<Message> {
         let bitmap = bitmap_from_icon(item.icon.as_ref());
         set_menu_type_by_position(parent, position, item.state);
         set_menu_bitmap_by_position(parent, position, bitmap.as_ref());
-        self.command_map.insert(command, item.message.clone());
+        if let Some(message) = &item.message {
+            self.command_map.insert(command, message.clone());
+        }
 
         Ok(Some(NativeMenuItem {
             bitmap,
@@ -648,7 +659,7 @@ mod tests {
     #[test]
     fn disabled_items_do_not_bind_accelerators() {
         let items = vec![NormalizedMenuItem::Standard(NormalizedCommandItem {
-            message: (),
+            message: Some(()),
             label: "Quit".to_string(),
             enabled: false,
             icon: None,

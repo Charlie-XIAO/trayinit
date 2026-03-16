@@ -17,8 +17,8 @@ pub enum MenuItem<Message> {
 impl<Message> MenuItem<Message> {
     pub fn message(&self) -> Option<&Message> {
         match self {
-            MenuItem::Standard(item) => Some(&item.message),
-            MenuItem::Check(item) => Some(&item.message),
+            MenuItem::Standard(item) => item.message.as_ref(),
+            MenuItem::Check(item) => item.message.as_ref(),
             MenuItem::RadioGroup(_) => None,
             MenuItem::Submenu(_) => None,
             MenuItem::Separator => None,
@@ -51,9 +51,11 @@ impl<Message> From<Submenu<Message>> for MenuItem<Message> {
 }
 
 /// A normal clickable menu item.
+///
+/// If no message is attached, activating the item is a no-op.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StandardItem<Message> {
-    pub message: Message,
+    pub message: Option<Message>,
     pub label: String,
     pub enabled: bool,
     pub visible: bool,
@@ -65,7 +67,7 @@ pub struct StandardItem<Message> {
 impl<Message> StandardItem<Message> {
     pub fn new(label: impl Into<String>, message: Message) -> Self {
         Self {
-            message,
+            message: Some(message),
             label: label.into(),
             enabled: true,
             visible: true,
@@ -73,6 +75,23 @@ impl<Message> StandardItem<Message> {
             icon_name: None,
             accelerator: None,
         }
+    }
+
+    pub fn without_message(label: impl Into<String>) -> Self {
+        Self {
+            message: None,
+            label: label.into(),
+            enabled: true,
+            visible: true,
+            icon: None,
+            icon_name: None,
+            accelerator: None,
+        }
+    }
+
+    pub fn with_message(mut self, message: Message) -> Self {
+        self.message = Some(message);
+        self
     }
 
     pub fn with_enabled(mut self, enabled: bool) -> Self {
@@ -102,9 +121,11 @@ impl<Message> StandardItem<Message> {
 }
 
 /// A checkable menu item.
+///
+/// If no message is attached, activating the item is a no-op.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckItem<Message> {
-    pub message: Message,
+    pub message: Option<Message>,
     pub label: String,
     pub enabled: bool,
     pub visible: bool,
@@ -117,7 +138,7 @@ pub struct CheckItem<Message> {
 impl<Message> CheckItem<Message> {
     pub fn new(label: impl Into<String>, checked: bool, message: Message) -> Self {
         Self {
-            message,
+            message: Some(message),
             label: label.into(),
             enabled: true,
             visible: true,
@@ -126,6 +147,24 @@ impl<Message> CheckItem<Message> {
             icon_name: None,
             accelerator: None,
         }
+    }
+
+    pub fn without_message(label: impl Into<String>, checked: bool) -> Self {
+        Self {
+            message: None,
+            label: label.into(),
+            enabled: true,
+            visible: true,
+            checked,
+            icon: None,
+            icon_name: None,
+            accelerator: None,
+        }
+    }
+
+    pub fn with_message(mut self, message: Message) -> Self {
+        self.message = Some(message);
+        self
     }
 
     pub fn with_enabled(mut self, enabled: bool) -> Self {
@@ -206,9 +245,11 @@ impl<Message> RadioGroup<Message> {
 }
 
 /// An option within a radio group.
+///
+/// If no message is attached, activating the item is a no-op.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RadioItem<Message> {
-    pub message: Message,
+    pub message: Option<Message>,
     pub label: String,
     pub enabled: bool,
     pub visible: bool,
@@ -220,7 +261,7 @@ pub struct RadioItem<Message> {
 impl<Message> RadioItem<Message> {
     pub fn new(label: impl Into<String>, message: Message) -> Self {
         Self {
-            message,
+            message: Some(message),
             label: label.into(),
             enabled: true,
             visible: true,
@@ -228,6 +269,23 @@ impl<Message> RadioItem<Message> {
             icon_name: None,
             accelerator: None,
         }
+    }
+
+    pub fn without_message(label: impl Into<String>) -> Self {
+        Self {
+            message: None,
+            label: label.into(),
+            enabled: true,
+            visible: true,
+            icon: None,
+            icon_name: None,
+            accelerator: None,
+        }
+    }
+
+    pub fn with_message(mut self, message: Message) -> Self {
+        self.message = Some(message);
+        self
     }
 
     pub fn with_enabled(mut self, enabled: bool) -> Self {
