@@ -11,6 +11,8 @@ enum Message {
     ToggleTicks,
     TogglePrimaryClickMenu,
     ResetTicks,
+    IconWarm,
+    IconCool,
     AccentRed,
     AccentGreen,
     AccentBlue,
@@ -92,7 +94,15 @@ impl Tray for ShowcaseTray {
                 Message::TogglePrimaryClickMenu,
             )
             .into(),
-            StandardItem::new("Reset tick counter", Message::ResetTicks).into(),
+            StandardItem::new("Reset tick counter", Message::ResetTicks)
+                .with_icon(make_menu_icon(0x6D, 0x70, 0x79))
+                .into(),
+            StandardItem::new("Icon sample: Warm", Message::IconWarm)
+                .with_icon(make_menu_icon(0xD7, 0xB7, 0x4A))
+                .into(),
+            StandardItem::new("Icon sample: Cool", Message::IconCool)
+                .with_icon(make_menu_icon(0x66, 0x8F, 0xD8))
+                .into(),
             MenuItem::Separator,
             RadioGroup::new(vec![
                 RadioItem::new("Accent: Red", Message::AccentRed),
@@ -101,14 +111,21 @@ impl Tray for ShowcaseTray {
             ])
             .with_selected(self.accent.selected_index())
             .into(),
-            MenuItem::Submenu(Submenu::new(
-                "Session",
-                vec![
-                    StandardItem::new("Reset tick counter", Message::ResetTicks).into(),
-                    MenuItem::Separator,
-                    StandardItem::new("Quit", Message::Quit).into(),
-                ],
-            )),
+            MenuItem::Submenu(
+                Submenu::new(
+                    "Session",
+                    vec![
+                        StandardItem::new("Reset tick counter", Message::ResetTicks)
+                            .with_icon(make_menu_icon(0x6D, 0x70, 0x79))
+                            .into(),
+                        MenuItem::Separator,
+                        StandardItem::new("Quit", Message::Quit)
+                            .with_icon(make_menu_icon(0xA2, 0x3B, 0x3B))
+                            .into(),
+                    ],
+                )
+                .with_icon(make_menu_icon(0x4C, 0x56, 0x67)),
+            ),
         ]
     }
 
@@ -123,6 +140,7 @@ impl Tray for ShowcaseTray {
             TrayEvent::Menu(Message::ResetTicks) => {
                 self.tick_count = 0;
             },
+            TrayEvent::Menu(Message::IconWarm | Message::IconCool) => {},
             TrayEvent::Menu(Message::AccentRed) => {
                 self.accent = Accent::Red;
             },
@@ -162,6 +180,7 @@ fn main() {
     println!("- check items");
     println!("- radio group");
     println!("- submenu");
+    println!("- generated menu item icons");
     println!("- external state updates via Handle::update");
 
     while keep_running.load(Ordering::Relaxed) {
@@ -215,4 +234,33 @@ fn make_icon(accent: Accent, active: bool) -> Icon {
     }
 
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated icon")
+}
+
+fn make_menu_icon(r: u8, g: u8, b: u8) -> Icon {
+    let width = 16usize;
+    let height = 16usize;
+    let mut rgba = vec![0; width * height * 4];
+
+    for y in 0..height {
+        for x in 0..width {
+            let offset = (y * width + x) * 4;
+            let border = x == 0 || y == 0 || x == width - 1 || y == height - 1;
+            let inset = x > 3 && x < width - 4 && y > 3 && y < height - 4;
+
+            let (pr, pg, pb, pa) = if border {
+                (0x14, 0x16, 0x1B, 0xC0)
+            } else if inset {
+                (r, g, b, 0xFF)
+            } else {
+                (r / 2, g / 2, b / 2, 0xE8)
+            };
+
+            rgba[offset] = pr;
+            rgba[offset + 1] = pg;
+            rgba[offset + 2] = pb;
+            rgba[offset + 3] = pa;
+        }
+    }
+
+    Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated menu icon")
 }
