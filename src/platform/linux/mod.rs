@@ -366,6 +366,14 @@ impl<T: Tray> Shared<T> {
         }
     }
 
+    fn refresh_for_menu_show(&self)
+    where
+        T::Message: Clone,
+    {
+        let mut state = self.lock_state();
+        let _ = state.refresh_snapshot();
+    }
+
     async fn refresh_and_emit(&self, conn: &Connection) -> Result<bool>
     where
         T::Message: Clone,
@@ -878,11 +886,13 @@ where
     }
 
     async fn about_to_show(&self) -> zbus::fdo::Result<bool> {
-        Ok(false)
+        self.0.refresh_for_menu_show();
+        Ok(true)
     }
 
     async fn about_to_show_group(&self) -> zbus::fdo::Result<(Vec<i32>, Vec<i32>)> {
-        Ok((Vec::new(), Vec::new()))
+        self.0.refresh_for_menu_show();
+        Ok((vec![0], Vec::new()))
     }
 
     #[zbus(property)]
