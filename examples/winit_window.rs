@@ -8,7 +8,7 @@ use trayinit::{Handle, Tray, TrayEvent, TrayMethods};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::platform::windows::EventLoopBuilderExtWindows;
+#[cfg(target_os = "windows")]
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowAttributes, WindowId};
 
@@ -96,17 +96,20 @@ impl ApplicationHandler for App {
             };
             let handle = tray.attach().expect("attach winit tray example");
 
-            let window = self.window.as_ref().expect("host window available");
-            let raw = window.window_handle().expect("window handle").as_raw();
-            let RawWindowHandle::Win32(window_handle) = raw else {
-                panic!("expected Win32 window handle");
-            };
-            unsafe {
-                trayinit::windows::register_accelerator_window(
-                    &handle,
-                    window_handle.hwnd.get() as _,
-                )
-                .expect("register accelerator window");
+            #[cfg(target_os = "windows")]
+            {
+                let window = self.window.as_ref().expect("host window available");
+                let raw = window.window_handle().expect("window handle").as_raw();
+                let RawWindowHandle::Win32(window_handle) = raw else {
+                    panic!("expected Win32 window handle");
+                };
+                unsafe {
+                    trayinit::windows::register_accelerator_window(
+                        &handle,
+                        window_handle.hwnd.get() as _,
+                    )
+                    .expect("register accelerator window");
+                }
             }
 
             *self
@@ -150,6 +153,7 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if !self.keep_running.load(Ordering::Relaxed) {
+            #[cfg(target_os = "windows")]
             if let (Some(tray), Some(window)) = (self.tray.take(), self.window.as_ref()) {
                 let raw = window.window_handle().expect("window handle").as_raw();
                 let RawWindowHandle::Win32(window_handle) = raw else {
@@ -199,19 +203,19 @@ fn main() {
 
     let hook_handle = Arc::new(Mutex::new(None::<Handle<WinitTray>>));
     let mut event_loop_builder = EventLoop::<()>::with_user_event();
+
+    #[cfg(target_os = "windows")]
     {
+        use windows_sys::Win32::UI::WindowsAndMessaging::MSG;
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+
         let hook_handle = Arc::clone(&hook_handle);
         event_loop_builder.with_msg_hook(move |msg| {
             let guard = hook_handle.lock().expect("lock accelerator hook handle");
             let Some(handle) = guard.as_ref() else {
                 return false;
             };
-
-            unsafe {
-                use windows_sys::Win32::UI::WindowsAndMessaging::MSG;
-
-                trayinit::windows::process_message(handle, msg as *const MSG)
-            }
+            unsafe { trayinit::windows::process_message(handle, msg as *const MSG) }
         });
     }
 
