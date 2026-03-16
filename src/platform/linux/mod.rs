@@ -397,15 +397,18 @@ impl<T: Tray> Shared<T> {
     where
         T::Message: Clone,
     {
-        let Some(message) = ({
+        let Some(should_refresh) = ({
             let mut state = self.lock_state();
             let current_menu = NormalizedTrayView::from_tray(&state.tray).menu;
             match message_at_path(&current_menu, path) {
                 Some(message) => {
-                    if let Some(message) = message.as_ref() {
-                        state.tray.event(TrayEvent::Menu(message.clone()));
-                    }
-                    Some(message)
+                    let should_refresh = if let Some(message) = message {
+                        state.tray.event(TrayEvent::Menu(message));
+                        true
+                    } else {
+                        false
+                    };
+                    Some(should_refresh)
                 },
                 None => None,
             }
@@ -415,7 +418,7 @@ impl<T: Tray> Shared<T> {
             ));
         };
 
-        if message.is_none() {
+        if !should_refresh {
             return Ok(());
         }
 
