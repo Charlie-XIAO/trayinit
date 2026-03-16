@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
+use png::{BitDepth, ColorType, Encoder};
 use serde::{Deserialize, Serialize};
 use zbus::zvariant::{OwnedValue, Str, Type, Value};
 
+use crate::Icon;
 use crate::menu::{Accelerator, Code, Modifiers};
 use crate::model::{CommandState, NormalizedCommandItem, NormalizedMenuItem, NormalizedSubmenu};
 
@@ -25,6 +27,7 @@ pub struct MenuEntry {
     label: String,
     enabled: bool,
     visible: bool,
+    icon_data: Vec<u8>,
     shortcut: Vec<Vec<String>>,
     toggle_type: ToggleType,
     toggle_state: ToggleState,
@@ -241,6 +244,19 @@ impl MenuEntry {
             }
         }
 
+        if self.icon_data != other.icon_data {
+            if other.icon_data == default.icon_data {
+                removed_props.push("icon-data".into());
+            } else {
+                updated_props.insert(
+                    "icon-data".into(),
+                    Value::from(other.icon_data.clone())
+                        .try_into()
+                        .expect("icon data should convert into an owned D-Bus value"),
+                );
+            }
+        }
+
         if self.shortcut != other.shortcut {
             if other.shortcut == default.shortcut {
                 removed_props.push("shortcut".into());
@@ -304,6 +320,17 @@ impl MenuEntry {
             properties.insert("visible".into(), self.visible.into());
         }
 
+        if !self.icon_data.is_empty()
+            && (property_names.is_empty() || property_names.iter().any(|name| name == "icon-data"))
+        {
+            properties.insert(
+                "icon-data".into(),
+                Value::from(self.icon_data.clone())
+                    .try_into()
+                    .expect("icon data should convert into an owned D-Bus value"),
+            );
+        }
+
         if !self.shortcut.is_empty()
             && (property_names.is_empty() || property_names.iter().any(|name| name == "shortcut"))
         {
@@ -350,6 +377,7 @@ impl Default for MenuEntry {
             label: String::new(),
             enabled: true,
             visible: true,
+            icon_data: Vec::new(),
             shortcut: Vec::new(),
             toggle_type: ToggleType::None,
             toggle_state: ToggleState::Indeterminate,
@@ -419,6 +447,7 @@ fn flatten_items<Message>(
                     label: String::new(),
                     enabled: false,
                     visible: true,
+                    icon_data: Vec::new(),
                     shortcut: Vec::new(),
                     toggle_type: ToggleType::None,
                     toggle_state: ToggleState::Indeterminate,
@@ -462,6 +491,7 @@ fn command_entry<Message>(
         label: item.label.clone(),
         enabled: item.enabled,
         visible: true,
+        icon_data: item.icon.as_ref().map(icon_data).unwrap_or_default(),
         shortcut: item
             .accelerator
             .as_ref()
@@ -480,6 +510,7 @@ fn submenu_entry<Message>(submenu: &NormalizedSubmenu<Message>) -> MenuEntry {
         label: submenu.label.clone(),
         enabled: submenu.enabled,
         visible: true,
+        icon_data: submenu.icon.as_ref().map(icon_data).unwrap_or_default(),
         shortcut: Vec::new(),
         toggle_type: ToggleType::None,
         toggle_state: ToggleState::Indeterminate,
@@ -526,6 +557,25 @@ fn shortcut_metadata(accelerator: &Accelerator) -> Vec<Vec<String>> {
 
     shortcut.push(shortcut_key(accelerator.key()));
     vec![shortcut]
+}
+
+fn icon_data(icon: &Icon) -> Vec<u8> {
+    // DBusMenu item icons are exported as encoded bytes, matching ksni's icon-data
+    // property.
+    let mut encoded = Vec::new();
+    {
+        let mut encoder = Encoder::new(&mut encoded, icon.width(), icon.height());
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(BitDepth::Eight);
+
+        let mut writer = encoder
+            .write_header()
+            .expect("RGBA icon should encode into a PNG header");
+        writer
+            .write_image_data(icon.rgba())
+            .expect("RGBA icon should encode into PNG bytes");
+    }
+    encoded
 }
 
 fn shortcut_key(code: Code) -> String {
@@ -595,4 +645,37 @@ fn shortcut_key(code: Code) -> String {
         _ => return format!("{code:?}"),
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MenuSnapshot, icon_data};
+    use crate::Icon;
+    use crate::model::NormalizedMenuItem;
+
+    #[test]
+    fn icon_data_is_exported_for_command_items() {
+        let icon = Icon::from_rgba(vec![255, 0, 0, 255], 1, 1).expect("valid icon");
+        let normalized = vec![NormalizedMenuItem::Standard(
+            crate::model::NormalizedCommandItem {
+                label: "Open".into(),
+                enabled: true,
+                icon: Some(icon.clone()),
+                accelerator: None,
+                state: crate::model::CommandState::Standard,
+                message: (),
+            },
+        )];
+
+        let snapshot = MenuSnapshot::from_normalized(&normalized);
+        let properties = snapshot
+            .properties_for_id(0, 1, &[])
+            .expect("properties should exist");
+
+        let expected =
+            zbus::zvariant::OwnedValue::try_from(zbus::zvariant::Value::from(icon_data(&icon)))
+                .expect("icon data should convert into an owned D-Bus value");
+
+        assert_eq!(properties.get("icon-data"), Some(&expected));
+    }
 }
