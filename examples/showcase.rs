@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use png::{ColorType, Decoder, Transformations};
 use trayinit::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
 use trayinit::{Icon, Tray, TrayEvent, TrayMethods};
 
@@ -12,9 +11,6 @@ enum Message {
     ToggleTicks,
     TogglePrimaryClickMenu,
     ResetTicks,
-    IconWarm,
-    IconCool,
-    IconAsset,
     AccentRed,
     AccentGreen,
     AccentBlue,
@@ -96,18 +92,7 @@ impl Tray for ShowcaseTray {
                 Message::TogglePrimaryClickMenu,
             )
             .into(),
-            StandardItem::new("Reset tick counter", Message::ResetTicks)
-                .with_icon(make_menu_icon(0x6D, 0x70, 0x79))
-                .into(),
-            StandardItem::new("Icon sample: Warm", Message::IconWarm)
-                .with_icon(make_menu_icon(0xD7, 0xB7, 0x4A))
-                .into(),
-            StandardItem::new("Icon sample: Cool", Message::IconCool)
-                .with_icon(make_menu_icon(0x66, 0x8F, 0xD8))
-                .into(),
-            StandardItem::new("Icon sample: Asset PNG", Message::IconAsset)
-                .with_icon(asset_icon())
-                .into(),
+            StandardItem::new("Reset tick counter", Message::ResetTicks).into(),
             MenuItem::Separator,
             RadioGroup::new(vec![
                 RadioItem::new("Accent: Red", Message::AccentRed),
@@ -116,21 +101,13 @@ impl Tray for ShowcaseTray {
             ])
             .with_selected(self.accent.selected_index())
             .into(),
-            MenuItem::Submenu(
-                Submenu::new(
-                    "Session",
-                    vec![
-                        StandardItem::new("Reset tick counter", Message::ResetTicks)
-                            .with_icon(make_menu_icon(0x6D, 0x70, 0x79))
-                            .into(),
-                        MenuItem::Separator,
-                        StandardItem::new("Quit", Message::Quit)
-                            .with_icon(make_menu_icon(0xA2, 0x3B, 0x3B))
-                            .into(),
-                    ],
-                )
-                .with_icon(make_menu_icon(0x4C, 0x56, 0x67)),
-            ),
+            MenuItem::Submenu(Submenu::new(
+                "Session",
+                vec![
+                    StandardItem::new("Reset tick counter", Message::ResetTicks).into(),
+                    StandardItem::new("Quit", Message::Quit).into(),
+                ],
+            )),
         ]
     }
 
@@ -145,7 +122,6 @@ impl Tray for ShowcaseTray {
             TrayEvent::Menu(Message::ResetTicks) => {
                 self.tick_count = 0;
             },
-            TrayEvent::Menu(Message::IconWarm | Message::IconCool | Message::IconAsset) => {},
             TrayEvent::Menu(Message::AccentRed) => {
                 self.accent = Accent::Red;
             },
@@ -185,8 +161,6 @@ fn main() {
     println!("- check items");
     println!("- radio group");
     println!("- submenu");
-    println!("- generated menu item icons");
-    println!("- embedded PNG icon loading via include_bytes!(\"icon.png\")");
     println!("- external state updates via Handle::update");
 
     while keep_running.load(Ordering::Relaxed) {
@@ -240,80 +214,4 @@ fn make_icon(accent: Accent, active: bool) -> Icon {
     }
 
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated icon")
-}
-
-fn make_menu_icon(r: u8, g: u8, b: u8) -> Icon {
-    let width = 16usize;
-    let height = 16usize;
-    let mut rgba = vec![0; width * height * 4];
-
-    for y in 0..height {
-        for x in 0..width {
-            let offset = (y * width + x) * 4;
-            let border = x == 0 || y == 0 || x == width - 1 || y == height - 1;
-            let inset = x > 3 && x < width - 4 && y > 3 && y < height - 4;
-
-            let (pr, pg, pb, pa) = if border {
-                (0x14, 0x16, 0x1B, 0xC0)
-            } else if inset {
-                (r, g, b, 0xFF)
-            } else {
-                (r / 2, g / 2, b / 2, 0xE8)
-            };
-
-            rgba[offset] = pr;
-            rgba[offset + 1] = pg;
-            rgba[offset + 2] = pb;
-            rgba[offset + 3] = pa;
-        }
-    }
-
-    Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated menu icon")
-}
-
-fn asset_icon() -> Icon {
-    let png_bytes = include_bytes!("icon.png");
-    let mut decoder = Decoder::new(std::io::Cursor::new(png_bytes));
-    decoder.set_transformations(Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().expect("decode example icon.png");
-
-    let mut rgba = vec![0; reader.output_buffer_size()];
-    let info = reader
-        .next_frame(&mut rgba)
-        .expect("read example icon.png frame");
-    rgba.truncate(info.buffer_size());
-
-    let rgba = match info.color_type {
-        ColorType::Rgba => rgba,
-        ColorType::Rgb => rgb_to_rgba(&rgba),
-        ColorType::GrayscaleAlpha => grayscale_alpha_to_rgba(&rgba),
-        ColorType::Grayscale => grayscale_to_rgba(&rgba),
-        ColorType::Indexed => panic!("indexed PNG should have been expanded"),
-    };
-
-    Icon::from_rgba(rgba, info.width, info.height).expect("valid icon from example icon.png")
-}
-
-fn rgb_to_rgba(rgb: &[u8]) -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
-    for chunk in rgb.chunks_exact(3) {
-        rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 0xFF]);
-    }
-    rgba
-}
-
-fn grayscale_alpha_to_rgba(data: &[u8]) -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(data.len() / 2 * 4);
-    for chunk in data.chunks_exact(2) {
-        rgba.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
-    }
-    rgba
-}
-
-fn grayscale_to_rgba(data: &[u8]) -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(data.len() * 4);
-    for &value in data {
-        rgba.extend_from_slice(&[value, value, value, 0xFF]);
-    }
-    rgba
 }
