@@ -134,6 +134,11 @@ impl<Message> CheckItem<Message> {
         self
     }
 
+    /// Sets a custom icon for the item.
+    ///
+    /// On Windows tray popup menus, custom item bitmaps occupy the same left
+    /// gutter as the native checkmark/radio indicator. Adding an icon to a
+    /// check item may therefore hide the native checked marker.
     pub fn with_icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
         self
@@ -219,6 +224,11 @@ impl<Message> RadioItem<Message> {
         self
     }
 
+    /// Sets a custom icon for the item.
+    ///
+    /// On Windows tray popup menus, custom item bitmaps occupy the same left
+    /// gutter as the native checkmark/radio indicator. Adding an icon to a
+    /// radio item may therefore hide the native selected marker.
     pub fn with_icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
         self

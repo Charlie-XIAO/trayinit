@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use png::{ColorType, Decoder, Transformations};
 use trayinit::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
 use trayinit::{Icon, Tray, TrayEvent, TrayMethods};
 
@@ -13,6 +14,7 @@ enum Message {
     ResetTicks,
     IconWarm,
     IconCool,
+    IconAsset,
     AccentRed,
     AccentGreen,
     AccentBlue,
@@ -103,6 +105,9 @@ impl Tray for ShowcaseTray {
             StandardItem::new("Icon sample: Cool", Message::IconCool)
                 .with_icon(make_menu_icon(0x66, 0x8F, 0xD8))
                 .into(),
+            StandardItem::new("Icon sample: Asset PNG", Message::IconAsset)
+                .with_icon(asset_icon())
+                .into(),
             MenuItem::Separator,
             RadioGroup::new(vec![
                 RadioItem::new("Accent: Red", Message::AccentRed),
@@ -140,7 +145,7 @@ impl Tray for ShowcaseTray {
             TrayEvent::Menu(Message::ResetTicks) => {
                 self.tick_count = 0;
             },
-            TrayEvent::Menu(Message::IconWarm | Message::IconCool) => {},
+            TrayEvent::Menu(Message::IconWarm | Message::IconCool | Message::IconAsset) => {},
             TrayEvent::Menu(Message::AccentRed) => {
                 self.accent = Accent::Red;
             },
@@ -181,6 +186,7 @@ fn main() {
     println!("- radio group");
     println!("- submenu");
     println!("- generated menu item icons");
+    println!("- embedded PNG icon loading via include_bytes!(\"icon.png\")");
     println!("- external state updates via Handle::update");
 
     while keep_running.load(Ordering::Relaxed) {
@@ -263,4 +269,51 @@ fn make_menu_icon(r: u8, g: u8, b: u8) -> Icon {
     }
 
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated menu icon")
+}
+
+fn asset_icon() -> Icon {
+    let png_bytes = include_bytes!("icon.png");
+    let mut decoder = Decoder::new(std::io::Cursor::new(png_bytes));
+    decoder.set_transformations(Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().expect("decode example icon.png");
+
+    let mut rgba = vec![0; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut rgba)
+        .expect("read example icon.png frame");
+    rgba.truncate(info.buffer_size());
+
+    let rgba = match info.color_type {
+        ColorType::Rgba => rgba,
+        ColorType::Rgb => rgb_to_rgba(&rgba),
+        ColorType::GrayscaleAlpha => grayscale_alpha_to_rgba(&rgba),
+        ColorType::Grayscale => grayscale_to_rgba(&rgba),
+        ColorType::Indexed => panic!("indexed PNG should have been expanded"),
+    };
+
+    Icon::from_rgba(rgba, info.width, info.height).expect("valid icon from example icon.png")
+}
+
+fn rgb_to_rgba(rgb: &[u8]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
+    for chunk in rgb.chunks_exact(3) {
+        rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 0xFF]);
+    }
+    rgba
+}
+
+fn grayscale_alpha_to_rgba(data: &[u8]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(data.len() / 2 * 4);
+    for chunk in data.chunks_exact(2) {
+        rgba.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
+    }
+    rgba
+}
+
+fn grayscale_to_rgba(data: &[u8]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(data.len() * 4);
+    for &value in data {
+        rgba.extend_from_slice(&[value, value, value, 0xFF]);
+    }
+    rgba
 }
