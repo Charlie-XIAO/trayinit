@@ -13,9 +13,11 @@ enum Message {
     TrayWarm,
     TrayCool,
     TrayAsset,
+    TrayNamed,
     MenuWarm,
     MenuCool,
     MenuAsset,
+    MenuNamed,
     Quit,
 }
 
@@ -24,6 +26,7 @@ enum TrayIconKind {
     Warm,
     Cool,
     Asset,
+    Named,
 }
 
 struct IconsTray {
@@ -39,11 +42,19 @@ impl Tray for IconsTray {
     }
 
     fn icon(&self) -> Option<Icon> {
-        Some(match self.tray_icon {
-            TrayIconKind::Warm => make_tray_icon(0xD7, 0xB7, 0x4A),
-            TrayIconKind::Cool => make_tray_icon(0x66, 0x8F, 0xD8),
-            TrayIconKind::Asset => asset_icon(),
-        })
+        match self.tray_icon {
+            TrayIconKind::Warm => Some(make_tray_icon(0xD7, 0xB7, 0x4A)),
+            TrayIconKind::Cool => Some(make_tray_icon(0x66, 0x8F, 0xD8)),
+            TrayIconKind::Asset => Some(asset_icon()),
+            TrayIconKind::Named => None,
+        }
+    }
+
+    fn icon_name(&self) -> Option<String> {
+        match self.tray_icon {
+            TrayIconKind::Named => Some("folder".into()),
+            _ => None,
+        }
     }
 
     fn title(&self) -> Option<String> {
@@ -51,6 +62,7 @@ impl Tray for IconsTray {
             TrayIconKind::Warm => "Icon demo: warm tray icon".into(),
             TrayIconKind::Cool => "Icon demo: cool tray icon".into(),
             TrayIconKind::Asset => "Icon demo: asset tray icon".into(),
+            TrayIconKind::Named => "Icon demo: themed tray icon name".into(),
         })
     }
 
@@ -69,6 +81,9 @@ impl Tray for IconsTray {
             StandardItem::new("Tray icon: Asset PNG", Message::TrayAsset)
                 .with_icon(asset_icon())
                 .into(),
+            StandardItem::new("Tray icon: Theme name (Linux)", Message::TrayNamed)
+                .with_icon_name("folder")
+                .into(),
             MenuItem::Separator,
             StandardItem::new("Menu icon: Warm", Message::MenuWarm)
                 .with_icon(make_menu_icon(0xD7, 0xB7, 0x4A))
@@ -78,6 +93,9 @@ impl Tray for IconsTray {
                 .into(),
             StandardItem::new("Menu icon: Asset PNG", Message::MenuAsset)
                 .with_icon(asset_icon())
+                .into(),
+            StandardItem::new("Menu icon: Theme name (Linux)", Message::MenuNamed)
+                .with_icon_name("document-open")
                 .into(),
             MenuItem::Submenu(
                 Submenu::new(
@@ -104,7 +122,12 @@ impl Tray for IconsTray {
             TrayEvent::Menu(Message::TrayAsset) => {
                 self.tray_icon = TrayIconKind::Asset;
             },
-            TrayEvent::Menu(Message::MenuWarm | Message::MenuCool | Message::MenuAsset) => {},
+            TrayEvent::Menu(Message::TrayNamed) => {
+                self.tray_icon = TrayIconKind::Named;
+            },
+            TrayEvent::Menu(
+                Message::MenuWarm | Message::MenuCool | Message::MenuAsset | Message::MenuNamed,
+            ) => {},
             TrayEvent::Menu(Message::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },
@@ -129,6 +152,7 @@ fn main() {
     println!("Features in this example:");
     println!("- embedded PNG tray icon loading via include_bytes!(\"icon.png\")");
     println!("- generated tray icons");
+    println!("- Linux theme icon names for tray and menu when supported by the host");
     println!("- menu item icons");
     println!("- submenu icon");
     println!("- tray icon switching from menu actions");

@@ -652,6 +652,7 @@ mod tests {
             label: "Quit".to_string(),
             enabled: false,
             icon: None,
+            icon_name: None,
             accelerator: Some(Accelerator::new(Some(Modifiers::CONTROL), Code::KeyQ)),
             state: CommandState::Standard,
         })];

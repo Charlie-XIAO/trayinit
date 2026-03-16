@@ -5,6 +5,7 @@ use crate::tray::{Tray, TrayStatus};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NormalizedTrayView<Message> {
     pub icon: Option<Icon>,
+    pub icon_name: Option<String>,
     pub title: Option<String>,
     pub tooltip: Option<String>,
     pub visible: bool,
@@ -17,6 +18,7 @@ impl<Message> NormalizedTrayView<Message> {
     pub fn from_tray<T: Tray<Message = Message>>(tray: &T) -> Self {
         Self {
             icon: tray.icon(),
+            icon_name: tray.icon_name(),
             title: tray.title(),
             tooltip: tray.tooltip(),
             visible: tray.visible(),
@@ -78,6 +80,7 @@ pub struct NormalizedCommandItem<Message> {
     pub label: String,
     pub enabled: bool,
     pub icon: Option<Icon>,
+    pub icon_name: Option<String>,
     pub accelerator: Option<Accelerator>,
     pub state: CommandState,
 }
@@ -94,6 +97,7 @@ pub struct NormalizedSubmenu<Message> {
     pub label: String,
     pub enabled: bool,
     pub icon: Option<Icon>,
+    pub icon_name: Option<String>,
     pub children: Vec<NormalizedMenuItem<Message>>,
 }
 
@@ -110,6 +114,7 @@ fn normalize_menu_items<Message>(
                     label: item.label,
                     enabled: item.enabled,
                     icon: item.icon,
+                    icon_name: item.icon_name,
                     accelerator: item.accelerator,
                     state: CommandState::Standard,
                 }));
@@ -120,6 +125,7 @@ fn normalize_menu_items<Message>(
                     label: item.label,
                     enabled: item.enabled,
                     icon: item.icon,
+                    icon_name: item.icon_name,
                     accelerator: item.accelerator,
                     state: CommandState::Check {
                         checked: item.checked,
@@ -137,6 +143,7 @@ fn normalize_menu_items<Message>(
                         label: option.label,
                         enabled: group.enabled && option.enabled,
                         icon: option.icon,
+                        icon_name: option.icon_name,
                         accelerator: option.accelerator,
                         state: CommandState::Radio {
                             selected: group.selected == Some(index),
@@ -154,6 +161,7 @@ fn normalize_menu_items<Message>(
                     label: submenu.label,
                     enabled: submenu.enabled,
                     icon: submenu.icon,
+                    icon_name: submenu.icon_name,
                     children,
                 }));
             },

@@ -461,6 +461,7 @@ struct Snapshot {
     title: String,
     status: Status,
     item_is_menu: bool,
+    icon_name: String,
     icon_pixmap: Vec<IconPixmap>,
     tool_tip: ToolTipData,
     menu_status: MenuStatus,
@@ -473,6 +474,7 @@ impl Snapshot {
     fn from_tray<T: Tray>(tray: &T, menu_revision: u32, menu_id_offset: i32) -> Self {
         let view = NormalizedTrayView::from_tray(tray);
         let title = view.title.unwrap_or_default();
+        let icon_name = view.icon_name.unwrap_or_default();
         let icon_pixmap = view
             .icon
             .as_ref()
@@ -488,9 +490,10 @@ impl Snapshot {
             title: title.clone(),
             status,
             item_is_menu,
+            icon_name: icon_name.clone(),
             icon_pixmap: icon_pixmap.clone(),
             tool_tip: ToolTipData {
-                icon_name: String::new(),
+                icon_name,
                 icon_pixmap,
                 title,
                 description: view.tooltip.unwrap_or_default(),
@@ -686,7 +689,7 @@ where
 
     #[zbus(property)]
     fn icon_name(&self) -> zbus::fdo::Result<String> {
-        Ok(String::new())
+        Ok(self.0.lock_state().snapshot.icon_name.clone())
     }
 
     #[zbus(property)]
@@ -941,7 +944,9 @@ where
             .await
             .map_err(zbus_error)?;
     }
-    if changes.old.icon_pixmap != changes.new.icon_pixmap {
+    if changes.old.icon_name != changes.new.icon_name
+        || changes.old.icon_pixmap != changes.new.icon_pixmap
+    {
         StatusNotifierItem::<T>::new_icon(sni.signal_emitter())
             .await
             .map_err(zbus_error)?;

@@ -27,6 +27,7 @@ pub struct MenuEntry {
     label: String,
     enabled: bool,
     visible: bool,
+    icon_name: String,
     icon_data: Vec<u8>,
     shortcut: Vec<Vec<String>>,
     toggle_type: ToggleType,
@@ -244,6 +245,17 @@ impl MenuEntry {
             }
         }
 
+        if self.icon_name != other.icon_name {
+            if other.icon_name == default.icon_name {
+                removed_props.push("icon-name".into());
+            } else {
+                updated_props.insert(
+                    "icon-name".into(),
+                    OwnedValue::from(Str::from(other.icon_name.clone())),
+                );
+            }
+        }
+
         if self.icon_data != other.icon_data {
             if other.icon_data == default.icon_data {
                 removed_props.push("icon-data".into());
@@ -320,6 +332,15 @@ impl MenuEntry {
             properties.insert("visible".into(), self.visible.into());
         }
 
+        if !self.icon_name.is_empty()
+            && (property_names.is_empty() || property_names.iter().any(|name| name == "icon-name"))
+        {
+            properties.insert(
+                "icon-name".into(),
+                OwnedValue::from(Str::from(self.icon_name.clone())),
+            );
+        }
+
         if !self.icon_data.is_empty()
             && (property_names.is_empty() || property_names.iter().any(|name| name == "icon-data"))
         {
@@ -377,6 +398,7 @@ impl Default for MenuEntry {
             label: String::new(),
             enabled: true,
             visible: true,
+            icon_name: String::new(),
             icon_data: Vec::new(),
             shortcut: Vec::new(),
             toggle_type: ToggleType::None,
@@ -447,6 +469,7 @@ fn flatten_items<Message>(
                     label: String::new(),
                     enabled: false,
                     visible: true,
+                    icon_name: String::new(),
                     icon_data: Vec::new(),
                     shortcut: Vec::new(),
                     toggle_type: ToggleType::None,
@@ -491,6 +514,7 @@ fn command_entry<Message>(
         label: item.label.clone(),
         enabled: item.enabled,
         visible: true,
+        icon_name: item.icon_name.clone().unwrap_or_default(),
         icon_data: item.icon.as_ref().map(icon_data).unwrap_or_default(),
         shortcut: item
             .accelerator
@@ -510,6 +534,7 @@ fn submenu_entry<Message>(submenu: &NormalizedSubmenu<Message>) -> MenuEntry {
         label: submenu.label.clone(),
         enabled: submenu.enabled,
         visible: true,
+        icon_name: submenu.icon_name.clone().unwrap_or_default(),
         icon_data: submenu.icon.as_ref().map(icon_data).unwrap_or_default(),
         shortcut: Vec::new(),
         toggle_type: ToggleType::None,

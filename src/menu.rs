@@ -58,6 +58,7 @@ pub struct StandardItem<Message> {
     pub enabled: bool,
     pub visible: bool,
     pub icon: Option<Icon>,
+    pub icon_name: Option<String>,
     pub accelerator: Option<Accelerator>,
 }
 
@@ -69,6 +70,7 @@ impl<Message> StandardItem<Message> {
             enabled: true,
             visible: true,
             icon: None,
+            icon_name: None,
             accelerator: None,
         }
     }
@@ -88,6 +90,11 @@ impl<Message> StandardItem<Message> {
         self
     }
 
+    pub fn with_icon_name(mut self, icon_name: impl Into<String>) -> Self {
+        self.icon_name = Some(icon_name.into());
+        self
+    }
+
     pub fn with_accelerator(mut self, accelerator: Accelerator) -> Self {
         self.accelerator = Some(accelerator);
         self
@@ -103,6 +110,7 @@ pub struct CheckItem<Message> {
     pub visible: bool,
     pub checked: bool,
     pub icon: Option<Icon>,
+    pub icon_name: Option<String>,
     pub accelerator: Option<Accelerator>,
 }
 
@@ -115,6 +123,7 @@ impl<Message> CheckItem<Message> {
             visible: true,
             checked,
             icon: None,
+            icon_name: None,
             accelerator: None,
         }
     }
@@ -141,6 +150,11 @@ impl<Message> CheckItem<Message> {
     /// check item may therefore hide the native checked marker.
     pub fn with_icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    pub fn with_icon_name(mut self, icon_name: impl Into<String>) -> Self {
+        self.icon_name = Some(icon_name.into());
         self
     }
 
@@ -199,6 +213,7 @@ pub struct RadioItem<Message> {
     pub enabled: bool,
     pub visible: bool,
     pub icon: Option<Icon>,
+    pub icon_name: Option<String>,
     pub accelerator: Option<Accelerator>,
 }
 
@@ -210,6 +225,7 @@ impl<Message> RadioItem<Message> {
             enabled: true,
             visible: true,
             icon: None,
+            icon_name: None,
             accelerator: None,
         }
     }
@@ -234,6 +250,11 @@ impl<Message> RadioItem<Message> {
         self
     }
 
+    pub fn with_icon_name(mut self, icon_name: impl Into<String>) -> Self {
+        self.icon_name = Some(icon_name.into());
+        self
+    }
+
     pub fn with_accelerator(mut self, accelerator: Accelerator) -> Self {
         self.accelerator = Some(accelerator);
         self
@@ -247,6 +268,7 @@ pub struct Submenu<Message> {
     pub enabled: bool,
     pub visible: bool,
     pub icon: Option<Icon>,
+    pub icon_name: Option<String>,
     pub children: Vec<MenuItem<Message>>,
 }
 
@@ -257,6 +279,7 @@ impl<Message> Submenu<Message> {
             enabled: true,
             visible: true,
             icon: None,
+            icon_name: None,
             children,
         }
     }
@@ -273,6 +296,11 @@ impl<Message> Submenu<Message> {
 
     pub fn with_icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    pub fn with_icon_name(mut self, icon_name: impl Into<String>) -> Self {
+        self.icon_name = Some(icon_name.into());
         self
     }
 }

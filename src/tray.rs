@@ -17,6 +17,15 @@ pub trait Tray: Sized + Send + 'static {
         None
     }
 
+    /// Themed tray icon name, if supported by the platform.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `IconName`; host/theme-dependent.
+    /// - Windows: ignored.
+    fn icon_name(&self) -> Option<String> {
+        None
+    }
+
     /// Tray title or label, if supported by the platform.
     ///
     /// Platform note:
