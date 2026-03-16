@@ -2,7 +2,11 @@
 #[path = "platform/windows/mod.rs"]
 mod platform;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+#[path = "platform/linux/mod.rs"]
+mod platform;
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
 #[path = "platform/unimplemented.rs"]
 mod platform;
 

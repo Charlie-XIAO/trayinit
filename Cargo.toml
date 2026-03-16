@@ -33,3 +33,9 @@ features = [
   "Win32_UI_Shell",
   "Win32_Graphics_Gdi",
 ]
+
+[target."cfg(target_os = \"linux\")".dependencies]
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "sync"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }

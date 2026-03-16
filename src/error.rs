@@ -21,6 +21,9 @@ pub enum Error {
     /// The platform backend failed to initialize or update native state.
     #[error("operating system error: {0}")]
     Os(#[from] std::io::Error),
+    /// A platform backend reported an implementation-specific failure.
+    #[error("{0}")]
+    Backend(String),
     /// A backend thread exited before it could finish initialization.
     #[error("{0}")]
     Initialization(&'static str),
