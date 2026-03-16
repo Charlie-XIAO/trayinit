@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use trayinit::menu::{Accelerator, CMD_OR_CTRL, CheckItem, Code, MenuItem, StandardItem};
 use trayinit::{Handle, Tray, TrayEvent, TrayMethods};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 #[cfg(target_os = "windows")]
@@ -79,13 +78,10 @@ struct App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
+            let attributes =
+                WindowAttributes::default().with_title("trayinit winit accelerator host");
             let window = event_loop
-                .create_window(
-                    WindowAttributes::default()
-                        .with_title("trayinit winit accelerator host")
-                        .with_inner_size(LogicalSize::new(720.0, 420.0))
-                        .with_visible(true),
-                )
+                .create_window(attributes)
                 .expect("create winit host window");
             self.window = Some(window);
         }
@@ -191,8 +187,16 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        if let WindowEvent::CloseRequested = event {
-            self.keep_running.store(false, Ordering::Relaxed);
+        match event {
+            WindowEvent::CloseRequested => {
+                self.keep_running.store(false, Ordering::Relaxed);
+            },
+            WindowEvent::RedrawRequested => {
+                if let Some(window) = self.window.as_ref() {
+                    window.pre_present_notify();
+                }
+            },
+            _ => {},
         }
     }
 }
