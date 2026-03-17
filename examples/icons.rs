@@ -164,15 +164,19 @@ impl Tray for IconsTray {
         match event {
             TrayEvent::Menu(Message::TrayWarm) => {
                 self.tray_icon = TrayIconKind::Warm;
+                self.needs_attention = false;
             },
             TrayEvent::Menu(Message::TrayCool) => {
                 self.tray_icon = TrayIconKind::Cool;
+                self.needs_attention = false;
             },
             TrayEvent::Menu(Message::TrayAsset) => {
                 self.tray_icon = TrayIconKind::Asset;
+                self.needs_attention = false;
             },
             TrayEvent::Menu(Message::TrayNamed) => {
                 self.tray_icon = TrayIconKind::Named;
+                self.needs_attention = false;
             },
             TrayEvent::Menu(Message::ToggleOverlay) => {
                 self.show_overlay = !self.show_overlay;
@@ -210,6 +214,9 @@ fn main() {
     println!("- Linux overlay and attention icon properties");
     println!(
         "- attention uses raster icons for raster tray icons, and icon-name only for the themed tray icon"
+    );
+    println!(
+        "- switching the base tray icon clears attention in this demo, because hosts may present attention state independently from normal icon replacement"
     );
     println!("- menu item icons");
     println!("- submenu icon");
