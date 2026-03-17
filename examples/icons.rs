@@ -5,8 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use png::{ColorType, Decoder, Transformations};
-use trayinit::menu::{MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
-use trayinit::{Icon, Tray, TrayEvent, TrayMethods};
+use trayinit::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
+use trayinit::{Icon, Tray, TrayEvent, TrayMethods, TrayStatus};
 
 #[derive(Debug, Copy, Clone)]
 enum Message {
@@ -14,6 +14,8 @@ enum Message {
     TrayCool,
     TrayAsset,
     TrayNamed,
+    ToggleOverlay,
+    ToggleAttention,
     Quit,
 }
 
@@ -27,6 +29,8 @@ enum TrayIconKind {
 
 struct IconsTray {
     tray_icon: TrayIconKind,
+    show_overlay: bool,
+    needs_attention: bool,
     keep_running: Arc<AtomicBool>,
 }
 
@@ -63,7 +67,33 @@ impl Tray for IconsTray {
     }
 
     fn tooltip(&self) -> Option<String> {
-        Some("Demonstrates tray icons and menu item icons.".into())
+        Some("Demonstrates tray icons, menu icons, overlay icons, and attention icons.".into())
+    }
+
+    fn overlay_icon_name(&self) -> Option<String> {
+        self.show_overlay.then(|| "emblem-ok".into())
+    }
+
+    fn overlay_icon(&self) -> Option<Icon> {
+        self.show_overlay
+            .then(|| make_overlay_icon(0x2D, 0xA5, 0x61))
+    }
+
+    fn attention_icon_name(&self) -> Option<String> {
+        self.needs_attention.then(|| "dialog-warning".into())
+    }
+
+    fn attention_icon(&self) -> Option<Icon> {
+        self.needs_attention
+            .then(|| make_tray_icon(0xD4, 0x55, 0x3D))
+    }
+
+    fn status(&self) -> TrayStatus {
+        if self.needs_attention {
+            TrayStatus::Attention
+        } else {
+            TrayStatus::Active
+        }
     }
 
     fn menu(&self) -> Vec<MenuItem<Self::Message>> {
@@ -82,6 +112,19 @@ impl Tray for IconsTray {
                 RadioItem::new("Tray icon: Theme name (Linux)", Message::TrayNamed),
             ])
             .with_selected(selected_tray_icon)
+            .into(),
+            MenuItem::Separator,
+            CheckItem::new(
+                "Show overlay badge (Linux)",
+                self.show_overlay,
+                Message::ToggleOverlay,
+            )
+            .into(),
+            CheckItem::new(
+                "Request attention (Linux)",
+                self.needs_attention,
+                Message::ToggleAttention,
+            )
             .into(),
             MenuItem::Separator,
             StandardItem::without_message("Menu icon: Warm")
@@ -124,6 +167,12 @@ impl Tray for IconsTray {
             TrayEvent::Menu(Message::TrayNamed) => {
                 self.tray_icon = TrayIconKind::Named;
             },
+            TrayEvent::Menu(Message::ToggleOverlay) => {
+                self.show_overlay = !self.show_overlay;
+            },
+            TrayEvent::Menu(Message::ToggleAttention) => {
+                self.needs_attention = !self.needs_attention;
+            },
             TrayEvent::Menu(Message::Quit) => {
                 self.keep_running.store(false, Ordering::Relaxed);
             },
@@ -139,6 +188,8 @@ fn main() {
     let keep_running = Arc::new(AtomicBool::new(true));
     let tray = IconsTray {
         tray_icon: TrayIconKind::Asset,
+        show_overlay: false,
+        needs_attention: false,
         keep_running: Arc::clone(&keep_running),
     };
     let handle = tray.spawn().expect("spawn icons tray example");
@@ -149,6 +200,7 @@ fn main() {
     println!("- embedded PNG tray icon loading via include_bytes!(\"icon.png\")");
     println!("- generated tray icons");
     println!("- Linux theme icon names for tray and menu when supported by the host");
+    println!("- Linux overlay and attention icon properties");
     println!("- menu item icons");
     println!("- submenu icon");
     println!("- tray icon switching from menu actions");
@@ -216,6 +268,36 @@ fn make_menu_icon(r: u8, g: u8, b: u8) -> Icon {
     }
 
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated menu icon")
+}
+
+fn make_overlay_icon(r: u8, g: u8, b: u8) -> Icon {
+    let width = 12usize;
+    let height = 12usize;
+    let mut rgba = vec![0; width * height * 4];
+
+    for y in 0..height {
+        for x in 0..width {
+            let offset = (y * width + x) * 4;
+            let dx = x as i32 - 5;
+            let dy = y as i32 - 5;
+            let radius_sq = dx * dx + dy * dy;
+
+            let (pr, pg, pb, pa) = if radius_sq <= 20 {
+                (r, g, b, 0xFF)
+            } else if radius_sq <= 30 {
+                (0x14, 0x16, 0x1B, 0xC0)
+            } else {
+                (0, 0, 0, 0)
+            };
+
+            rgba[offset] = pr;
+            rgba[offset + 1] = pg;
+            rgba[offset + 2] = pb;
+            rgba[offset + 3] = pa;
+        }
+    }
+
+    Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated overlay icon")
 }
 
 fn asset_icon() -> Icon {

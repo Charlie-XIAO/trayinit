@@ -26,6 +26,51 @@ pub trait Tray: Sized + Send + 'static {
         None
     }
 
+    /// Themed overlay icon name, if supported by the platform.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `OverlayIconName`; host/theme-dependent.
+    /// - Windows: ignored.
+    fn overlay_icon_name(&self) -> Option<String> {
+        None
+    }
+
+    /// Raster overlay icon image, if supported by the platform.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `OverlayIconPixmap`.
+    /// - Windows: ignored.
+    fn overlay_icon(&self) -> Option<Icon> {
+        None
+    }
+
+    /// Themed attention icon name, if supported by the platform.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `AttentionIconName`; host/theme-dependent.
+    /// - Windows: ignored.
+    fn attention_icon_name(&self) -> Option<String> {
+        None
+    }
+
+    /// Raster attention icon image, if supported by the platform.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `AttentionIconPixmap`.
+    /// - Windows: ignored.
+    fn attention_icon(&self) -> Option<Icon> {
+        None
+    }
+
+    /// Optional attention animation resource name.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `AttentionMovieName`; hosts may ignore it.
+    /// - Windows: ignored.
+    fn attention_movie_name(&self) -> Option<String> {
+        None
+    }
+
     /// Tray title or label, if supported by the platform.
     ///
     /// Platform note:

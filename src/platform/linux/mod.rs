@@ -477,6 +477,11 @@ struct Snapshot {
     item_is_menu: bool,
     icon_name: String,
     icon_pixmap: Vec<IconPixmap>,
+    overlay_icon_name: String,
+    overlay_icon_pixmap: Vec<IconPixmap>,
+    attention_icon_name: String,
+    attention_icon_pixmap: Vec<IconPixmap>,
+    attention_movie_name: String,
     tool_tip: ToolTipData,
     menu_status: MenuStatus,
     menu: MenuSnapshot,
@@ -495,6 +500,20 @@ impl Snapshot {
             .map(icon_pixmap_from_icon)
             .into_iter()
             .collect::<Vec<_>>();
+        let overlay_icon_name = view.overlay_icon_name.unwrap_or_default();
+        let overlay_icon_pixmap = view
+            .overlay_icon
+            .as_ref()
+            .map(icon_pixmap_from_icon)
+            .into_iter()
+            .collect::<Vec<_>>();
+        let attention_icon_name = view.attention_icon_name.unwrap_or_default();
+        let attention_icon_pixmap = view
+            .attention_icon
+            .as_ref()
+            .map(icon_pixmap_from_icon)
+            .into_iter()
+            .collect::<Vec<_>>();
         let menu = MenuSnapshot::from_normalized(&view.menu);
         let item_is_menu = view.menu_on_primary_click && !menu.is_empty();
         let status = status_from_view(view.visible, view.status);
@@ -506,9 +525,22 @@ impl Snapshot {
             item_is_menu,
             icon_name: icon_name.clone(),
             icon_pixmap: icon_pixmap.clone(),
+            overlay_icon_name,
+            overlay_icon_pixmap,
+            attention_icon_name: attention_icon_name.clone(),
+            attention_icon_pixmap: attention_icon_pixmap.clone(),
+            attention_movie_name: view.attention_movie_name.unwrap_or_default(),
             tool_tip: ToolTipData {
-                icon_name,
-                icon_pixmap,
+                icon_name: if status == Status::NeedsAttention {
+                    attention_icon_name
+                } else {
+                    icon_name
+                },
+                icon_pixmap: if status == Status::NeedsAttention {
+                    attention_icon_pixmap
+                } else {
+                    icon_pixmap
+                },
                 title,
                 description: view.tooltip.unwrap_or_default(),
             },
@@ -713,27 +745,27 @@ where
 
     #[zbus(property)]
     fn overlay_icon_name(&self) -> zbus::fdo::Result<String> {
-        Ok(String::new())
+        Ok(self.0.lock_state().snapshot.overlay_icon_name.clone())
     }
 
     #[zbus(property)]
     fn overlay_icon_pixmap(&self) -> zbus::fdo::Result<Vec<IconPixmap>> {
-        Ok(Vec::new())
+        Ok(self.0.lock_state().snapshot.overlay_icon_pixmap.clone())
     }
 
     #[zbus(property)]
     fn attention_icon_name(&self) -> zbus::fdo::Result<String> {
-        Ok(String::new())
+        Ok(self.0.lock_state().snapshot.attention_icon_name.clone())
     }
 
     #[zbus(property)]
     fn attention_icon_pixmap(&self) -> zbus::fdo::Result<Vec<IconPixmap>> {
-        Ok(Vec::new())
+        Ok(self.0.lock_state().snapshot.attention_icon_pixmap.clone())
     }
 
     #[zbus(property)]
     fn attention_movie_name(&self) -> zbus::fdo::Result<String> {
-        Ok(String::new())
+        Ok(self.0.lock_state().snapshot.attention_movie_name.clone())
     }
 
     #[zbus(property)]
@@ -962,6 +994,21 @@ where
         || changes.old.icon_pixmap != changes.new.icon_pixmap
     {
         StatusNotifierItem::<T>::new_icon(sni.signal_emitter())
+            .await
+            .map_err(zbus_error)?;
+    }
+    if changes.old.overlay_icon_name != changes.new.overlay_icon_name
+        || changes.old.overlay_icon_pixmap != changes.new.overlay_icon_pixmap
+    {
+        StatusNotifierItem::<T>::new_overlay_icon(sni.signal_emitter())
+            .await
+            .map_err(zbus_error)?;
+    }
+    if changes.old.attention_icon_name != changes.new.attention_icon_name
+        || changes.old.attention_icon_pixmap != changes.new.attention_icon_pixmap
+        || changes.old.attention_movie_name != changes.new.attention_movie_name
+    {
+        StatusNotifierItem::<T>::new_attention_icon(sni.signal_emitter())
             .await
             .map_err(zbus_error)?;
     }

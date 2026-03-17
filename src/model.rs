@@ -6,6 +6,11 @@ use crate::tray::{Tray, TrayStatus};
 pub struct NormalizedTrayView<Message> {
     pub icon: Option<Icon>,
     pub icon_name: Option<String>,
+    pub overlay_icon: Option<Icon>,
+    pub overlay_icon_name: Option<String>,
+    pub attention_icon: Option<Icon>,
+    pub attention_icon_name: Option<String>,
+    pub attention_movie_name: Option<String>,
     pub title: Option<String>,
     pub tooltip: Option<String>,
     pub visible: bool,
@@ -19,6 +24,11 @@ impl<Message> NormalizedTrayView<Message> {
         Self {
             icon: tray.icon(),
             icon_name: tray.icon_name(),
+            overlay_icon: tray.overlay_icon(),
+            overlay_icon_name: tray.overlay_icon_name(),
+            attention_icon: tray.attention_icon(),
+            attention_icon_name: tray.attention_icon_name(),
+            attention_movie_name: tray.attention_movie_name(),
             title: tray.title(),
             tooltip: tray.tooltip(),
             visible: tray.visible(),
