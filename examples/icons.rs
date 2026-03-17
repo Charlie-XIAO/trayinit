@@ -80,12 +80,19 @@ impl Tray for IconsTray {
     }
 
     fn attention_icon_name(&self) -> Option<String> {
-        self.needs_attention.then(|| "dialog-warning".into())
+        if self.needs_attention && matches!(self.tray_icon, TrayIconKind::Named) {
+            Some("dialog-warning".into())
+        } else {
+            None
+        }
     }
 
     fn attention_icon(&self) -> Option<Icon> {
-        self.needs_attention
-            .then(|| make_tray_icon(0xD4, 0x55, 0x3D))
+        if self.needs_attention && !matches!(self.tray_icon, TrayIconKind::Named) {
+            Some(make_tray_icon(0xD4, 0x55, 0x3D))
+        } else {
+            None
+        }
     }
 
     fn status(&self) -> TrayStatus {
@@ -201,6 +208,9 @@ fn main() {
     println!("- generated tray icons");
     println!("- Linux theme icon names for tray and menu when supported by the host");
     println!("- Linux overlay and attention icon properties");
+    println!(
+        "- attention uses raster icons for raster tray icons, and icon-name only for the themed tray icon"
+    );
     println!("- menu item icons");
     println!("- submenu icon");
     println!("- tray icon switching from menu actions");
