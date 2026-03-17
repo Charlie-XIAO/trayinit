@@ -306,6 +306,7 @@ impl MenuEntry {
     }
 
     fn to_dbus_map(&self, property_names: &[String]) -> HashMap<String, OwnedValue> {
+        let default = Self::default();
         let mut properties = HashMap::new();
 
         if property_names.is_empty() || property_names.iter().any(|name| name == "type") {
@@ -317,18 +318,24 @@ impl MenuEntry {
             }
         }
 
-        if property_names.is_empty() || property_names.iter().any(|name| name == "label") {
+        if self.label != default.label
+            && (property_names.is_empty() || property_names.iter().any(|name| name == "label"))
+        {
             properties.insert(
                 "label".into(),
                 OwnedValue::from(Str::from(self.label.clone())),
             );
         }
 
-        if property_names.is_empty() || property_names.iter().any(|name| name == "enabled") {
+        if self.enabled != default.enabled
+            && (property_names.is_empty() || property_names.iter().any(|name| name == "enabled"))
+        {
             properties.insert("enabled".into(), self.enabled.into());
         }
 
-        if property_names.is_empty() || property_names.iter().any(|name| name == "visible") {
+        if self.visible != default.visible
+            && (property_names.is_empty() || property_names.iter().any(|name| name == "visible"))
+        {
             properties.insert("visible".into(), self.visible.into());
         }
 

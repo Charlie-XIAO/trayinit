@@ -29,10 +29,9 @@ pub trait Tray: Sized + Send + 'static {
     /// Themed tray icon name, if supported by the platform.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.IconName`.
-    ///   The same name is also used for
-    ///   `org.kde.StatusNotifierItem.ToolTip` icon data unless an attention
-    ///   icon is currently active.
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.IconName`. The
+    ///   same name is also used for `org.kde.StatusNotifierItem.ToolTip` icon
+    ///   data unless an attention icon is currently active.
     /// - Windows: ignored.
     fn icon_name(&self) -> Option<String> {
         None
@@ -91,10 +90,10 @@ pub trait Tray: Sized + Send + 'static {
     /// Tray title or label, if supported by the platform.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Title`.
-    ///   It is also reused as `org.kde.StatusNotifierItem.ToolTip.title`,
-    ///   because the core API intentionally does not have a second
-    ///   Linux-specific tooltip-title field.
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Title`. It is
+    ///   also reused as `org.kde.StatusNotifierItem.ToolTip.title`, because the
+    ///   core API intentionally does not have a second Linux-specific
+    ///   tooltip-title field.
     /// - Windows: unsupported.
     fn title(&self) -> Option<String> {
         None
@@ -104,10 +103,10 @@ pub trait Tray: Sized + Send + 'static {
     ///
     /// Platform notes:
     /// - Linux SNI/DBus: exported as
-    ///   `org.kde.StatusNotifierItem.ToolTip.description`.
-    ///   This is the tooltip body/description field, not the tooltip title.
-    ///   The tooltip title comes from [`Tray::title`].
-    ///   Some desktops may ignore or delay tooltip presentation entirely.
+    ///   `org.kde.StatusNotifierItem.ToolTip.description`. This is the tooltip
+    ///   body/description field, not the tooltip title. The tooltip title comes
+    ///   from [`Tray::title`]. Some desktops may ignore or delay tooltip
+    ///   presentation entirely.
     /// - Windows: exported as tray tooltip text.
     fn tooltip(&self) -> Option<String> {
         None
@@ -126,8 +125,8 @@ pub trait Tray: Sized + Send + 'static {
     /// High-level tray state hint.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Status`.
-    ///   If [`Tray::visible`] is `false`, Linux still exports `Passive`.
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Status`. If
+    ///   [`Tray::visible`] is `false`, Linux still exports `Passive`.
     fn status(&self) -> TrayStatus {
         TrayStatus::Active
     }
@@ -155,9 +154,9 @@ pub trait Tray: Sized + Send + 'static {
     /// Declarative tray menu tree.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported through
-    ///   `org.kde.StatusNotifierItem.Menu`, which points to the
-    ///   `com.canonical.dbusmenu` object path served by the backend.
+    /// - Linux SNI/DBus: exported through `org.kde.StatusNotifierItem.Menu`,
+    ///   which points to the `com.canonical.dbusmenu` object path served by the
+    ///   backend.
     fn menu(&self) -> Vec<MenuItem<Self::Message>> {
         Vec::new()
     }
@@ -187,6 +186,11 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///
     /// This is the preferred startup mode for windowed apps such as `winit`
     /// applications. The backend does not own the app's top-level control flow.
+    ///
+    /// Platform notes:
+    /// - Linux: currently still uses a dedicated backend thread internally.
+    ///   `attach()` on Linux means "the host keeps its own top-level control
+    ///   flow", not "callbacks run on the caller thread".
     fn attach(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -198,6 +202,10 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///
     /// This is mainly a convenience for backends that can own themselves on a
     /// helper thread without taking over the caller's main thread.
+    ///
+    /// Platform notes:
+    /// - Linux: currently uses a dedicated backend thread for the SNI/DBus
+    ///   service.
     fn spawn(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -209,6 +217,10 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///
     /// This mode is intended for tray-only apps where the tray runtime should
     /// own the application's top-level control flow.
+    ///
+    /// Platform notes:
+    /// - Linux: currently blocks by waiting for the dedicated backend thread,
+    ///   rather than hosting the D-Bus service directly on the caller thread.
     fn run(self) -> Result<()>
     where
         Self::Message: Clone,
@@ -278,6 +290,11 @@ pub enum InteractionKind {
     #[default]
     PrimaryActivate,
     SecondaryActivate,
+    /// Semantic request to show a context menu.
+    ///
+    /// Linux note:
+    /// - With an exported DBusMenu, some hosts render the menu themselves and
+    ///   do not surface a `ContextMenu` callback back into the application.
     ContextMenu,
 }
 
@@ -333,7 +350,8 @@ impl<T: Tray> Builder<T> {
     }
 
     /// Controls whether Linux should assume a watcher/host is available instead
-    /// of waiting for one to appear on D-Bus.
+    /// of performing fail-fast availability checks for a watcher/registered
+    /// host at startup.
     pub fn linux_assume_watcher_available(mut self, assume_watcher_available: bool) -> Self {
         self.linux.assume_watcher_available = assume_watcher_available;
         self
@@ -395,7 +413,8 @@ pub struct LinuxOptions {
     /// Whether to own the well-known SNI D-Bus name
     /// (`org.kde.StatusNotifierItem-PID-ID`).
     pub own_dbus_name: bool,
-    /// Whether to skip waiting for a watcher/host and assume SNI is available.
+    /// Whether to skip fail-fast availability checks and continue even if the
+    /// watcher or a registered host is currently absent.
     pub assume_watcher_available: bool,
 }
 

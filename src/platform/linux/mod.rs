@@ -295,7 +295,14 @@ where
             Some(change) = watcher_name_changes.next() => {
                 let args = change.args().map_err(zbus_error)?;
                 if args.new_owner.is_some() {
-                    let _ = watcher.register_status_notifier_item(&name).await;
+                    if let Err(error) = watcher.register_status_notifier_item(&name).await {
+                        #[cfg(feature = "tracing")]
+                        tracing::warn!(
+                            "failed to re-register Linux tray with StatusNotifierWatcher: {error}"
+                        );
+                        #[cfg(not(feature = "tracing"))]
+                        let _ = error;
+                    }
                 }
             }
             else => break,
@@ -428,6 +435,24 @@ impl<T: Tray> Shared<T> {
         }
         Ok(())
     }
+
+    fn dispatch_menu_path_in_state(
+        state: &mut ServiceState<T>,
+        menu: &[crate::model::NormalizedMenuItem<T::Message>],
+        path: &[usize],
+    ) -> core::result::Result<bool, ()>
+    where
+        T::Message: Clone,
+    {
+        match message_at_path(menu, path) {
+            Some(Some(message)) => {
+                state.tray.event(TrayEvent::Menu(message));
+                Ok(true)
+            },
+            Some(None) => Ok(false),
+            None => Err(()),
+        }
+    }
 }
 
 struct ServiceState<T: Tray> {
@@ -518,6 +543,8 @@ impl Snapshot {
         let menu = MenuSnapshot::from_normalized(&view.menu);
         let item_is_menu = view.menu_on_primary_click && !menu.is_empty();
         let status = status_from_view(view.visible, view.status);
+        let use_attention_tooltip_icon = status == Status::NeedsAttention
+            && (!attention_icon_name.is_empty() || !attention_icon_pixmap.is_empty());
 
         Self {
             id: tray.id().to_string(),
@@ -533,12 +560,12 @@ impl Snapshot {
             attention_icon_pixmap: attention_icon_pixmap.clone(),
             attention_movie_name: view.attention_movie_name.unwrap_or_default(),
             tool_tip: ToolTipData {
-                icon_name: if status == Status::NeedsAttention {
+                icon_name: if use_attention_tooltip_icon {
                     attention_icon_name
                 } else {
                     icon_name
                 },
-                icon_pixmap: if status == Status::NeedsAttention {
+                icon_pixmap: if use_attention_tooltip_icon {
                     attention_icon_pixmap
                 } else {
                     icon_pixmap
@@ -899,30 +926,60 @@ where
         #[zbus(connection)] conn: &Connection,
         events: Vec<(i32, String, zbus::zvariant::OwnedValue, u32)>,
     ) -> zbus::fdo::Result<Vec<i32>> {
-        let mut not_found = Vec::new();
-        for (id, event_id, _data, _timestamp) in events {
-            if event_id != "clicked" {
-                continue;
-            }
+        if events.is_empty() {
+            return Err(zbus::fdo::Error::InvalidArgs("Empty events".into()));
+        }
 
-            let path = {
-                let state = self.0.lock_state();
-                state
+        let mut not_found = Vec::new();
+        let mut clicked_count = 0usize;
+        let mut found_any = false;
+        let mut should_refresh = false;
+
+        {
+            let mut state = self.0.lock_state();
+            let current_menu = NormalizedTrayView::from_tray(&state.tray).menu;
+
+            for (id, event_id, _data, _timestamp) in events {
+                if event_id != "clicked" {
+                    continue;
+                }
+                clicked_count += 1;
+
+                let path = state
                     .snapshot
                     .menu
                     .message_path_for_id(state.snapshot.menu_id_offset, id)
-                    .map(ToOwned::to_owned)
-            };
+                    .map(ToOwned::to_owned);
 
-            match path {
-                Some(path) => {
-                    if self.0.dispatch_menu_path(conn, &path).await.is_err() {
-                        not_found.push(id);
-                    }
-                },
-                None => not_found.push(id),
+                match path {
+                    Some(path) => {
+                        match Shared::dispatch_menu_path_in_state(&mut state, &current_menu, &path)
+                        {
+                            Ok(refresh) => {
+                                found_any = true;
+                                should_refresh |= refresh;
+                            },
+                            Err(()) => not_found.push(id),
+                        }
+                    },
+                    None => not_found.push(id),
+                }
             }
         }
+
+        if clicked_count > 0 && !found_any {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "None of the id in the events can be found".into(),
+            ));
+        }
+
+        if should_refresh {
+            let should_exit = self.0.refresh_and_emit(conn).await.map_err(to_fdo_error)?;
+            if should_exit {
+                let _ = self.0.post_command(Command::Shutdown);
+            }
+        }
+
         Ok(not_found)
     }
 
