@@ -49,4 +49,6 @@ current decisions do not get lost in chat history.
     current click-driven menu model.
 - Revisit Linux runtime semantics
   - Today `attach()` / `spawn()` / `run()` all use a dedicated backend thread.
-    We may later revisit whether Linux should get a more distinct runtime model.
+    `Builder::linux_tokio_handle(...)` can reuse a host Tokio runtime instead
+    of creating a private one, but it does not yet give Linux a distinct
+    current-thread integration model.

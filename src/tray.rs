@@ -190,7 +190,9 @@ pub trait TrayMethods: Tray + private::Sealed {
     /// Platform notes:
     /// - Linux: currently still uses a dedicated backend thread internally.
     ///   `attach()` on Linux means "the host keeps its own top-level control
-    ///   flow", not "callbacks run on the caller thread".
+    ///   flow", not "callbacks run on the caller thread". If
+    ///   `Builder::linux_tokio_handle(...)` is set, the backend reuses that
+    ///   Tokio runtime instead of creating its own private runtime.
     fn attach(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -205,7 +207,8 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///
     /// Platform notes:
     /// - Linux: currently uses a dedicated backend thread for the SNI/DBus
-    ///   service.
+    ///   service. If `Builder::linux_tokio_handle(...)` is set, the backend
+    ///   reuses that Tokio runtime instead of creating its own private runtime.
     fn spawn(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -221,6 +224,9 @@ pub trait TrayMethods: Tray + private::Sealed {
     /// Platform notes:
     /// - Linux: currently blocks by waiting for the dedicated backend thread,
     ///   rather than hosting the D-Bus service directly on the caller thread.
+    ///   If `Builder::linux_tokio_handle(...)` is set, the backend still uses
+    ///   the helper thread, but reuses that Tokio runtime instead of creating a
+    ///   private one.
     fn run(self) -> Result<()>
     where
         Self::Message: Clone,
@@ -321,6 +327,8 @@ pub struct Builder<T: Tray> {
     pub(crate) tray: T,
     pub(crate) runtime_preference: RuntimePreference,
     pub(crate) linux: LinuxOptions,
+    #[cfg(target_os = "linux")]
+    pub(crate) linux_tokio_handle: Option<tokio::runtime::Handle>,
 }
 
 impl<T: Tray> Builder<T> {
@@ -329,6 +337,8 @@ impl<T: Tray> Builder<T> {
             tray,
             runtime_preference: RuntimePreference::Auto,
             linux: LinuxOptions::default(),
+            #[cfg(target_os = "linux")]
+            linux_tokio_handle: None,
         }
     }
 
@@ -354,6 +364,20 @@ impl<T: Tray> Builder<T> {
     /// host at startup.
     pub fn linux_assume_watcher_available(mut self, assume_watcher_available: bool) -> Self {
         self.linux.assume_watcher_available = assume_watcher_available;
+        self
+    }
+
+    /// Reuses an existing Tokio runtime for the Linux SNI/DBus backend.
+    ///
+    /// Platform notes:
+    /// - Linux: if set, the backend will reuse this runtime instead of creating
+    ///   its own private Tokio runtime. The Linux backend still uses its helper
+    ///   thread for startup/shutdown coordination.
+    /// - Linux: this is primarily useful for host applications that already run
+    ///   a multi-threaded Tokio runtime.
+    #[cfg(target_os = "linux")]
+    pub fn linux_tokio_handle(mut self, tokio_handle: tokio::runtime::Handle) -> Self {
+        self.linux_tokio_handle = Some(tokio_handle);
         self
     }
 

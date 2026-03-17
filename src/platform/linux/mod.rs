@@ -9,7 +9,7 @@ use std::{fmt, thread};
 use dpi::PhysicalPosition;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Builder as RuntimeBuilder;
+use tokio::runtime::{Builder as RuntimeBuilder, Handle as TokioHandle};
 use tokio::sync::mpsc as tokio_mpsc;
 use zbus::fdo::DBusProxy;
 use zbus::names::InterfaceName;
@@ -150,6 +150,7 @@ where
         tray,
         runtime_preference: _,
         linux,
+        linux_tokio_handle,
     } = builder;
 
     let tray_id = tray.id().to_string();
@@ -164,7 +165,7 @@ where
 
     thread::Builder::new()
         .name(thread_name)
-        .spawn(move || backend_thread(init_shared, command_rx, linux, init_tx))
+        .spawn(move || backend_thread(init_shared, command_rx, linux, linux_tokio_handle, init_tx))
         .map_err(Error::Os)?;
 
     match init_rx.recv() {
@@ -180,24 +181,33 @@ fn backend_thread<T: Tray>(
     shared: Arc<Shared<T>>,
     command_rx: tokio_mpsc::UnboundedReceiver<Command>,
     linux: LinuxOptions,
+    tokio_handle: Option<TokioHandle>,
     init_tx: mpsc::SyncSender<Result<()>>,
 ) where
     T::Message: Clone,
 {
-    let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            let _ = init_tx.send(Err(Error::Backend(format!(
-                "failed to create Linux tray runtime: {error}"
-            ))));
-            shared.mark_closed();
-            return;
-        },
+    let result = if let Some(tokio_handle) = tokio_handle {
+        tokio_handle.block_on(run_backend(shared.clone(), command_rx, linux, init_tx))
+    } else {
+        let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = init_tx.send(Err(Error::Backend(format!(
+                    "failed to create Linux tray runtime: {error}"
+                ))));
+                shared.mark_closed();
+                return;
+            },
+        };
+
+        runtime.block_on(run_backend(shared.clone(), command_rx, linux, init_tx))
     };
 
-    let result = runtime.block_on(run_backend(shared.clone(), command_rx, linux, init_tx));
     if let Err(error) = result {
-        eprintln!("trayinit: Linux tray backend exited with error: {error}");
+        #[cfg(feature = "tracing")]
+        tracing::error!("Linux tray backend exited with error: {error}");
+        #[cfg(not(feature = "tracing"))]
+        let _ = error;
     }
     shared.mark_closed();
 }
@@ -297,9 +307,7 @@ where
                 if args.new_owner.is_some() {
                     if let Err(error) = watcher.register_status_notifier_item(&name).await {
                         #[cfg(feature = "tracing")]
-                        tracing::warn!(
-                            "Failed to re-register Linux tray with StatusNotifierWatcher: {error}"
-                        );
+                        tracing::error!("Failed to re-register Linux tray with StatusNotifierWatcher: {error}");
                         #[cfg(not(feature = "tracing"))]
                         let _ = error;
                     }

@@ -415,6 +415,7 @@ where
         }
     }
 
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, err))]
     fn render(&mut self) -> Result<()> {
         let view = {
             let tray = self.shared.lock_tray();
@@ -514,10 +515,7 @@ where
             let mut tray = self.shared.lock_tray();
             tray.event(event);
         }
-
-        if let Err(error) = self.render() {
-            eprintln!("trayinit: refresh after event failed: {error}");
-        }
+        let _ = self.render();
         self.maybe_request_shutdown();
     }
 
@@ -555,9 +553,7 @@ where
         });
 
         if self.native.menu_refresh_pending {
-            if let Err(error) = self.render() {
-                eprintln!("trayinit: deferred menu refresh failed: {error}");
-            }
+            let _ = self.render();
         }
 
         if let Some(id) = selected_id {
@@ -618,9 +614,7 @@ where
     }
 
     fn on_refresh(&mut self) {
-        if let Err(error) = self.render() {
-            eprintln!("trayinit: refresh failed: {error}");
-        }
+        let _ = self.render();
         self.maybe_request_shutdown();
     }
 
