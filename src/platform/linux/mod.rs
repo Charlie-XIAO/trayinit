@@ -298,7 +298,7 @@ where
                     if let Err(error) = watcher.register_status_notifier_item(&name).await {
                         #[cfg(feature = "tracing")]
                         tracing::warn!(
-                            "failed to re-register Linux tray with StatusNotifierWatcher: {error}"
+                            "Failed to re-register Linux tray with StatusNotifierWatcher: {error}"
                         );
                         #[cfg(not(feature = "tracing"))]
                         let _ = error;
@@ -864,6 +864,13 @@ where
     > {
         let state = self.0.lock_state();
         let mut grouped = Vec::new();
+        let ids = if ids.is_empty() {
+            (0..state.snapshot.menu.entry_count())
+                .map(|index| menu_item_id(state.snapshot.menu_id_offset, index))
+                .collect::<Vec<_>>()
+        } else {
+            ids
+        };
         for id in ids {
             if let Some(properties) = state.snapshot.menu.properties_for_id(
                 state.snapshot.menu_id_offset,
