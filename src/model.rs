@@ -72,6 +72,7 @@ impl MenuPath {
         Self(segments)
     }
 
+    #[cfg(target_os = "windows")]
     pub fn as_slice(&self) -> &[usize] {
         &self.0
     }

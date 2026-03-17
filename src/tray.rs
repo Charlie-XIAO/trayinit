@@ -10,9 +10,18 @@ pub trait Tray: Sized + Send + 'static {
     type Message;
 
     /// Stable identifier for the tray instance.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Id`.
     fn id(&self) -> &str;
 
     /// Tray icon image.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.IconPixmap`.
+    ///   The same raster is also used for `org.kde.StatusNotifierItem.ToolTip`
+    ///   icon data unless an attention icon is currently active.
+    /// - Windows: converted to a tray `HICON`.
     fn icon(&self) -> Option<Icon> {
         None
     }
@@ -20,7 +29,10 @@ pub trait Tray: Sized + Send + 'static {
     /// Themed tray icon name, if supported by the platform.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `IconName`; host/theme-dependent.
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.IconName`.
+    ///   The same name is also used for
+    ///   `org.kde.StatusNotifierItem.ToolTip` icon data unless an attention
+    ///   icon is currently active.
     /// - Windows: ignored.
     fn icon_name(&self) -> Option<String> {
         None
@@ -29,7 +41,8 @@ pub trait Tray: Sized + Send + 'static {
     /// Themed overlay icon name, if supported by the platform.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `OverlayIconName`; host/theme-dependent.
+    /// - Linux SNI/DBus: exported as
+    ///   `org.kde.StatusNotifierItem.OverlayIconName`; host/theme-dependent.
     /// - Windows: ignored.
     fn overlay_icon_name(&self) -> Option<String> {
         None
@@ -38,7 +51,8 @@ pub trait Tray: Sized + Send + 'static {
     /// Raster overlay icon image, if supported by the platform.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `OverlayIconPixmap`.
+    /// - Linux SNI/DBus: exported as
+    ///   `org.kde.StatusNotifierItem.OverlayIconPixmap`.
     /// - Windows: ignored.
     fn overlay_icon(&self) -> Option<Icon> {
         None
@@ -47,7 +61,8 @@ pub trait Tray: Sized + Send + 'static {
     /// Themed attention icon name, if supported by the platform.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `AttentionIconName`; host/theme-dependent.
+    /// - Linux SNI/DBus: exported as
+    ///   `org.kde.StatusNotifierItem.AttentionIconName`; host/theme-dependent.
     /// - Windows: ignored.
     fn attention_icon_name(&self) -> Option<String> {
         None
@@ -56,7 +71,8 @@ pub trait Tray: Sized + Send + 'static {
     /// Raster attention icon image, if supported by the platform.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `AttentionIconPixmap`.
+    /// - Linux SNI/DBus: exported as
+    ///   `org.kde.StatusNotifierItem.AttentionIconPixmap`.
     /// - Windows: ignored.
     fn attention_icon(&self) -> Option<Icon> {
         None
@@ -65,7 +81,8 @@ pub trait Tray: Sized + Send + 'static {
     /// Optional attention animation resource name.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `AttentionMovieName`; hosts may ignore it.
+    /// - Linux SNI/DBus: exported as
+    ///   `org.kde.StatusNotifierItem.AttentionMovieName`; hosts may ignore it.
     /// - Windows: ignored.
     fn attention_movie_name(&self) -> Option<String> {
         None
@@ -73,7 +90,11 @@ pub trait Tray: Sized + Send + 'static {
 
     /// Tray title or label, if supported by the platform.
     ///
-    /// Platform note:
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Title`.
+    ///   It is also reused as `org.kde.StatusNotifierItem.ToolTip.title`,
+    ///   because the core API intentionally does not have a second
+    ///   Linux-specific tooltip-title field.
     /// - Windows: unsupported.
     fn title(&self) -> Option<String> {
         None
@@ -82,18 +103,31 @@ pub trait Tray: Sized + Send + 'static {
     /// Tray tooltip text.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: host-dependent. Some desktops may ignore or delay
-    ///   tooltip presentation entirely.
+    /// - Linux SNI/DBus: exported as
+    ///   `org.kde.StatusNotifierItem.ToolTip.description`.
+    ///   This is the tooltip body/description field, not the tooltip title.
+    ///   The tooltip title comes from [`Tray::title`].
+    ///   Some desktops may ignore or delay tooltip presentation entirely.
+    /// - Windows: exported as tray tooltip text.
     fn tooltip(&self) -> Option<String> {
         None
     }
 
     /// Whether the tray should be visible.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: there is no direct
+    ///   `org.kde.StatusNotifierItem.Visible` property. `false` currently
+    ///   degrades to `org.kde.StatusNotifierItem.Status = Passive`.
     fn visible(&self) -> bool {
         true
     }
 
     /// High-level tray state hint.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Status`.
+    ///   If [`Tray::visible`] is `false`, Linux still exports `Passive`.
     fn status(&self) -> TrayStatus {
         TrayStatus::Active
     }
@@ -101,7 +135,7 @@ pub trait Tray: Sized + Send + 'static {
     /// Linux tray category hint.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: exported as `Category`.
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.Category`.
     /// - Windows: ignored.
     fn category(&self) -> TrayCategory {
         TrayCategory::ApplicationStatus
@@ -110,14 +144,20 @@ pub trait Tray: Sized + Send + 'static {
     /// Whether primary activation should open the menu.
     ///
     /// Platform notes:
-    /// - Linux SNI/DBus: best-effort only. Hosts may choose their own primary
-    ///   click behavior when a menu is exported, and some desktops do not
-    ///   surface this as a reliable live toggle.
+    /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.ItemIsMenu`,
+    ///   but still best-effort only. Hosts may choose their own primary click
+    ///   behavior when a menu is exported, and some desktops do not surface
+    ///   this as a reliable live toggle.
     fn menu_on_primary_click(&self) -> bool {
         false
     }
 
     /// Declarative tray menu tree.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported through
+    ///   `org.kde.StatusNotifierItem.Menu`, which points to the
+    ///   `com.canonical.dbusmenu` object path served by the backend.
     fn menu(&self) -> Vec<MenuItem<Self::Message>> {
         Vec::new()
     }
@@ -190,19 +230,26 @@ mod private {
 /// High-level tray visibility/importance hint.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TrayStatus {
+    /// Idle/passive state.
     Passive,
     #[default]
+    /// Normal active state.
     Active,
+    /// Attention-requesting state.
     Attention,
 }
 
 /// Linux tray category hint.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TrayCategory {
+    /// Generic application state.
     #[default]
     ApplicationStatus,
+    /// Communication-oriented application state.
     Communications,
+    /// System service state.
     SystemServices,
+    /// Hardware-related state.
     Hardware,
 }
 
@@ -278,11 +325,15 @@ impl<T: Tray> Builder<T> {
         self
     }
 
+    /// Controls whether Linux should own the well-known SNI D-Bus name
+    /// (`org.kde.StatusNotifierItem-PID-ID`).
     pub fn linux_own_dbus_name(mut self, own_dbus_name: bool) -> Self {
         self.linux.own_dbus_name = own_dbus_name;
         self
     }
 
+    /// Controls whether Linux should assume a watcher/host is available instead
+    /// of waiting for one to appear on D-Bus.
     pub fn linux_assume_watcher_available(mut self, assume_watcher_available: bool) -> Self {
         self.linux.assume_watcher_available = assume_watcher_available;
         self
@@ -341,7 +392,10 @@ pub enum RuntimePreference {
 /// Linux-specific spawn options that are intentionally kept off the core trait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LinuxOptions {
+    /// Whether to own the well-known SNI D-Bus name
+    /// (`org.kde.StatusNotifierItem-PID-ID`).
     pub own_dbus_name: bool,
+    /// Whether to skip waiting for a watcher/host and assume SNI is available.
     pub assume_watcher_available: bool,
 }
 
