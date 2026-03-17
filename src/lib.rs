@@ -11,7 +11,7 @@ pub use crate::error::{ClosedError, Error, IconError, Result};
 pub use crate::icon::Icon;
 pub use crate::tray::{
     Builder, Handle, InteractionEvent, InteractionKind, LinuxOptions, RuntimePreference,
-    ScrollAxis, ScrollEvent, Tray, TrayEvent, TrayMethods, TrayStatus,
+    ScrollAxis, ScrollEvent, Tray, TrayCategory, TrayEvent, TrayMethods, TrayStatus,
 };
 
 #[cfg(target_os = "windows")]

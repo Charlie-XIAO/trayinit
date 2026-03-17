@@ -21,7 +21,7 @@ use self::menu::{Layout, MenuSnapshot, message_at_path};
 use crate::model::NormalizedTrayView;
 use crate::{
     Builder, ClosedError, Error, Handle, Icon, InteractionEvent, InteractionKind, LinuxOptions,
-    Result, RuntimePreference, ScrollAxis, ScrollEvent, Tray, TrayEvent, TrayStatus,
+    Result, RuntimePreference, ScrollAxis, ScrollEvent, Tray, TrayCategory, TrayEvent, TrayStatus,
 };
 
 const SNI_PATH: ObjectPath<'static> = ObjectPath::from_static_str_unchecked("/StatusNotifierItem");
@@ -472,6 +472,7 @@ where
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Snapshot {
     id: String,
+    category: Category,
     title: String,
     status: Status,
     item_is_menu: bool,
@@ -520,6 +521,7 @@ impl Snapshot {
 
         Self {
             id: tray.id().to_string(),
+            category: category_from_view(view.category),
             title: title.clone(),
             status,
             item_is_menu,
@@ -695,7 +697,7 @@ where
 
     #[zbus(property)]
     fn category(&self) -> zbus::fdo::Result<Category> {
-        Ok(Category::ApplicationStatus)
+        Ok(self.0.lock_state().snapshot.category)
     }
 
     #[zbus(property)]
@@ -990,6 +992,16 @@ where
             .await
             .map_err(zbus_error)?;
     }
+    if changes.old.category != changes.new.category {
+        zbus::fdo::Properties::properties_changed(
+            sni.signal_emitter(),
+            SNI_INTERFACE,
+            HashMap::from([("Category", Value::from(changes.new.category))]),
+            Cow::Borrowed(&[]),
+        )
+        .await
+        .map_err(zbus_error)?;
+    }
     if changes.old.icon_name != changes.new.icon_name
         || changes.old.icon_pixmap != changes.new.icon_pixmap
     {
@@ -1111,6 +1123,15 @@ fn status_from_view(visible: bool, status: TrayStatus) -> Status {
     }
 }
 
+fn category_from_view(category: TrayCategory) -> Category {
+    match category {
+        TrayCategory::ApplicationStatus => Category::ApplicationStatus,
+        TrayCategory::Communications => Category::Communications,
+        TrayCategory::SystemServices => Category::SystemServices,
+        TrayCategory::Hardware => Category::Hardware,
+    }
+}
+
 fn menu_status_from_tray_status(status: Status) -> MenuStatus {
     match status {
         Status::NeedsAttention => MenuStatus::Notice,
@@ -1143,12 +1164,18 @@ fn to_fdo_error(error: Error) -> zbus::fdo::Error {
 #[zvariant(signature = "s")]
 enum Category {
     ApplicationStatus,
+    Communications,
+    SystemServices,
+    Hardware,
 }
 
 impl fmt::Display for Category {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ApplicationStatus => f.write_str("ApplicationStatus"),
+            Self::Communications => f.write_str("Communications"),
+            Self::SystemServices => f.write_str("SystemServices"),
+            Self::Hardware => f.write_str("Hardware"),
         }
     }
 }

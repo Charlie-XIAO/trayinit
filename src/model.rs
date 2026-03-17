@@ -1,6 +1,6 @@
 use crate::Icon;
 use crate::menu::{Accelerator, MenuItem};
-use crate::tray::{Tray, TrayStatus};
+use crate::tray::{Tray, TrayCategory, TrayStatus};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NormalizedTrayView<Message> {
@@ -15,6 +15,7 @@ pub struct NormalizedTrayView<Message> {
     pub tooltip: Option<String>,
     pub visible: bool,
     pub status: TrayStatus,
+    pub category: TrayCategory,
     pub menu_on_primary_click: bool,
     pub menu: Vec<NormalizedMenuItem<Message>>,
 }
@@ -33,6 +34,7 @@ impl<Message> NormalizedTrayView<Message> {
             tooltip: tray.tooltip(),
             visible: tray.visible(),
             status: tray.status(),
+            category: tray.category(),
             menu_on_primary_click: tray.menu_on_primary_click(),
             menu: normalize_menu_items(tray.menu()),
         }
@@ -297,7 +299,7 @@ fn collect_menu_patches<Message: Clone>(
 mod tests {
     use super::{CommandState, MenuDiff, NormalizedMenuItem, NormalizedTrayView, diff_menu_items};
     use crate::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
-    use crate::{Icon, Tray, TrayEvent, TrayStatus};
+    use crate::{Icon, Tray, TrayCategory, TrayEvent, TrayStatus};
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     enum Message {
@@ -312,6 +314,7 @@ mod tests {
         tooltip: Option<String>,
         visible: bool,
         status: TrayStatus,
+        category: TrayCategory,
         menu_on_primary_click: bool,
         menu: Vec<MenuItem<Message>>,
     }
@@ -343,6 +346,10 @@ mod tests {
             self.status
         }
 
+        fn category(&self) -> TrayCategory {
+            self.category
+        }
+
         fn menu_on_primary_click(&self) -> bool {
             self.menu_on_primary_click
         }
@@ -361,6 +368,7 @@ mod tests {
             tooltip: None,
             visible: true,
             status: TrayStatus::Active,
+            category: TrayCategory::ApplicationStatus,
             menu_on_primary_click: false,
             menu,
         }

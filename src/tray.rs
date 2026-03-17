@@ -98,6 +98,15 @@ pub trait Tray: Sized + Send + 'static {
         TrayStatus::Active
     }
 
+    /// Linux tray category hint.
+    ///
+    /// Platform notes:
+    /// - Linux SNI/DBus: exported as `Category`.
+    /// - Windows: ignored.
+    fn category(&self) -> TrayCategory {
+        TrayCategory::ApplicationStatus
+    }
+
     /// Whether primary activation should open the menu.
     ///
     /// Platform notes:
@@ -185,6 +194,16 @@ pub enum TrayStatus {
     #[default]
     Active,
     Attention,
+}
+
+/// Linux tray category hint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TrayCategory {
+    #[default]
+    ApplicationStatus,
+    Communications,
+    SystemServices,
+    Hardware,
 }
 
 /// Event emitted from a tray backend into [`Tray::event`].
