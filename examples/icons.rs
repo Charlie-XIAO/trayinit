@@ -213,10 +213,12 @@ fn main() {
     println!("- Linux theme icon names for tray and menu when supported by the host");
     println!("- Linux overlay and attention icon properties");
     println!(
-        "- attention uses raster icons for raster tray icons, and icon-name only for the themed tray icon"
+        "- attention uses raster icons for raster tray icons, and icon-name only for the themed \
+         tray icon"
     );
     println!(
-        "- switching the base tray icon clears attention in this demo, because hosts may present attention state independently from normal icon replacement"
+        "- switching the base tray icon clears attention in this demo, because hosts may present \
+         attention state independently from normal icon replacement"
     );
     println!("- menu item icons");
     println!("- submenu icon");

@@ -21,6 +21,8 @@ pub trait Tray: Sized + Send + 'static {
     /// - Linux SNI/DBus: exported as `org.kde.StatusNotifierItem.IconPixmap`.
     ///   The same raster is also used for `org.kde.StatusNotifierItem.ToolTip`
     ///   icon data unless an attention icon is currently active.
+    /// - macOS: mapped to the `NSStatusItem` button image through `tray-icon`'s
+    ///   `NSStatusBar` / `NSStatusItem` backend.
     /// - Windows: converted to a tray `HICON`.
     fn icon(&self) -> Option<Icon> {
         None
@@ -94,6 +96,7 @@ pub trait Tray: Sized + Send + 'static {
     ///   also reused as `org.kde.StatusNotifierItem.ToolTip.title`, because the
     ///   core API intentionally does not have a second Linux-specific
     ///   tooltip-title field.
+    /// - macOS: mapped to the `NSStatusItem` button title through `tray-icon`.
     /// - Windows: unsupported.
     fn title(&self) -> Option<String> {
         None
@@ -107,6 +110,8 @@ pub trait Tray: Sized + Send + 'static {
     ///   body/description field, not the tooltip title. The tooltip title comes
     ///   from [`Tray::title`]. Some desktops may ignore or delay tooltip
     ///   presentation entirely.
+    /// - macOS: mapped to the `NSStatusItem` button tooltip through
+    ///   `tray-icon`.
     /// - Windows: exported as tray tooltip text.
     fn tooltip(&self) -> Option<String> {
         None
@@ -147,6 +152,8 @@ pub trait Tray: Sized + Send + 'static {
     ///   but still best-effort only. Hosts may choose their own primary click
     ///   behavior when a menu is exported, and some desktops do not surface
     ///   this as a reliable live toggle.
+    /// - macOS: mapped to `tray-icon`'s custom `NSStatusItem` view behavior for
+    ///   showing the attached menu on left click.
     fn menu_on_primary_click(&self) -> bool {
         false
     }
@@ -157,6 +164,8 @@ pub trait Tray: Sized + Send + 'static {
     /// - Linux SNI/DBus: exported through `org.kde.StatusNotifierItem.Menu`,
     ///   which points to the `com.canonical.dbusmenu` object path served by the
     ///   backend.
+    /// - macOS: converted to a native `NSMenu` through `tray-icon`'s re-export
+    ///   of `muda`.
     fn menu(&self) -> Vec<MenuItem<Self::Message>> {
         Vec::new()
     }
@@ -193,6 +202,9 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///   flow", not "callbacks run on the caller thread". If
     ///   `Builder::linux_tokio_handle(...)` is set, the backend reuses that
     ///   Tokio runtime instead of creating its own private runtime.
+    /// - macOS: this is currently the only supported startup mode. It must be
+    ///   called on the main thread after the host AppKit event loop is running,
+    ///   matching `tray-icon`'s documented macOS constraints.
     fn attach(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -209,6 +221,9 @@ pub trait TrayMethods: Tray + private::Sealed {
     /// - Linux: currently uses a dedicated backend thread for the SNI/DBus
     ///   service. If `Builder::linux_tokio_handle(...)` is set, the backend
     ///   reuses that Tokio runtime instead of creating its own private runtime.
+    /// - macOS: currently unsupported. The backend uses `NSStatusItem` through
+    ///   `tray-icon`, which requires creation on the main thread with an
+    ///   already-running AppKit event loop.
     fn spawn(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -227,6 +242,8 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///   If `Builder::linux_tokio_handle(...)` is set, the backend still uses
     ///   the helper thread, but reuses that Tokio runtime instead of creating a
     ///   private one.
+    /// - macOS: currently unsupported. Use [`TrayMethods::attach`] from an
+    ///   existing AppKit-driven application loop instead.
     fn run(self) -> Result<()>
     where
         Self::Message: Clone,
