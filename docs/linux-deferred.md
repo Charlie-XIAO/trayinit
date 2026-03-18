@@ -52,3 +52,19 @@ current decisions do not get lost in chat history.
     `Builder::linux_tokio_handle(...)` can reuse a host Tokio runtime instead
     of creating a private one, but it does not yet give Linux a distinct
     current-thread integration model.
+
+## Known caveats
+
+- Attention/overlay presentation is host-controlled
+  - `attention_icon*`, `attention_movie_name`, and `overlay_icon*` are real
+    SNI properties that `trayinit` exports, but Linux hosts are free to decide
+    how to visualize them.
+  - In practice, hosts may ignore overlay icons entirely, or present attention
+    state using composition/caching behavior that does not look like a strict
+    "replace the current icon with this exact new icon" model.
+  - Because of that, mixing base tray-icon changes with active attention state
+    can produce host-specific results that are hard to interpret from the UI
+    alone.
+  - If this needs to be verified later, the right next step is to inspect the
+    exported D-Bus state/signals directly (for example with `busctl`) before
+    treating it as a backend bug.
