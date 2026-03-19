@@ -496,11 +496,17 @@ impl<T: Tray> Handle<T> {
         &self.tray_id
     }
 
-    pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> core::result::Result<R, ClosedError> {
+    pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> core::result::Result<R, ClosedError>
+    where
+        T::Message: Clone,
+    {
         self.inner.update(f)
     }
 
-    pub fn refresh(&self) -> core::result::Result<(), ClosedError> {
+    pub fn refresh(&self) -> core::result::Result<(), ClosedError>
+    where
+        T::Message: Clone,
+    {
         self.inner.refresh()
     }
 

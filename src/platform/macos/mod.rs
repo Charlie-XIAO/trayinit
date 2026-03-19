@@ -217,6 +217,59 @@ struct State<T: Tray> {
     has_menu: bool,
 }
 
+impl<T: Tray> Shared<T> {
+    fn register(self: Rc<Self>) {
+        let (tray_id, menu_ids) = {
+            let state = self.state.borrow();
+            (state.tray_id.clone(), state.registered_menu_ids.clone())
+        };
+
+        let runtime: Rc<dyn RuntimeOps> = self;
+        REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            registry.trays.insert(tray_id.clone(), runtime);
+            for menu_id in menu_ids {
+                registry.menus.insert(menu_id, tray_id.clone());
+            }
+        });
+    }
+
+    fn maybe_shutdown(&self) {
+        if self.closed.get() {
+            return;
+        }
+
+        let should_exit = self.state.borrow().tray.should_exit();
+        if should_exit {
+            self.shutdown();
+        }
+    }
+
+    fn shutdown(&self) {
+        if self.closed.replace(true) {
+            return;
+        }
+
+        let (tray_id, menu_ids) = {
+            let mut state = self.state.borrow_mut();
+            state.menu_messages.clear();
+            state.has_menu = false;
+            (
+                state.tray_id.clone(),
+                mem::take(&mut state.registered_menu_ids),
+            )
+        };
+
+        REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            registry.trays.remove(&tray_id);
+            for menu_id in menu_ids {
+                registry.menus.remove(&menu_id);
+            }
+        });
+    }
+}
+
 impl<T: Tray> Shared<T>
 where
     T::Message: Clone,
@@ -259,22 +312,6 @@ where
                 has_menu: !view.menu.is_empty(),
             }),
         }))
-    }
-
-    fn register(self: Rc<Self>) {
-        let (tray_id, menu_ids) = {
-            let state = self.state.borrow();
-            (state.tray_id.clone(), state.registered_menu_ids.clone())
-        };
-
-        let runtime: Rc<dyn RuntimeOps> = self;
-        REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            registry.trays.insert(tray_id.clone(), runtime);
-            for menu_id in menu_ids {
-                registry.menus.insert(menu_id, tray_id.clone());
-            }
-        });
     }
 
     fn render(&self) -> Result<()> {
@@ -338,41 +375,6 @@ where
             #[cfg(not(feature = "tracing"))]
             let _ = error;
         }
-    }
-
-    fn maybe_shutdown(&self) {
-        if self.closed.get() {
-            return;
-        }
-
-        let should_exit = self.state.borrow().tray.should_exit();
-        if should_exit {
-            self.shutdown();
-        }
-    }
-
-    fn shutdown(&self) {
-        if self.closed.replace(true) {
-            return;
-        }
-
-        let (tray_id, menu_ids) = {
-            let mut state = self.state.borrow_mut();
-            state.menu_messages.clear();
-            state.has_menu = false;
-            (
-                state.tray_id.clone(),
-                mem::take(&mut state.registered_menu_ids),
-            )
-        };
-
-        REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            registry.trays.remove(&tray_id);
-            for menu_id in menu_ids {
-                registry.menus.remove(&menu_id);
-            }
-        });
     }
 
     fn dispatch_tray_event(&self, event: TrayEvent<T::Message>) {
