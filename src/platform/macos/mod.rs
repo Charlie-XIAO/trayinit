@@ -612,7 +612,8 @@ define_class!(
         fn update_tracking_areas(&self) {
             unsafe {
                 let areas = self.trackingAreas();
-                for area in &areas {
+                for index in 0..areas.count() {
+                    let area = areas.objectAtIndex(index);
                     self.removeTrackingArea(&area);
                 }
 
