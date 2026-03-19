@@ -1,29 +1,35 @@
-//! macOS backend built on top of `tray-icon`'s `NSStatusItem` implementation
-//! and its re-exported `muda` menu types, rather than a fresh AppKit rewrite.
-//! That keeps behavior close to the battle-tested upstream path we already use
-//! as a reference on Windows.
+//! Native macOS backend implemented directly with `objc2`/AppKit.
+//!
+//! This intentionally follows the same native building blocks as the
+//! battle-tested `tray-icon` and `muda` implementations under
+//! `D:\Projects\probe`, but keeps the implementation in this crate.
+
+mod accelerator;
+mod icon;
+mod util;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-use std::sync::Once;
-use std::{fmt, mem, thread_local};
+use std::{fmt, ptr, thread_local};
 
-use dpi::{PhysicalPosition, PhysicalSize};
-use tray_icon::menu::accelerator::Accelerator as NativeAccelerator;
-use tray_icon::menu::{
-    self as native_menu, CheckMenuItem as NativeCheckMenuItem, ContextMenu, Icon as NativeMenuIcon,
-    IconMenuItem, IsMenuItem, Menu as NativeMenu, MenuEvent as NativeMenuEvent,
-    MenuId as NativeMenuId, MenuItem as NativeMenuItem,
-    PredefinedMenuItem as NativePredefinedMenuItem, Submenu as NativeSubmenu,
+use objc2::rc::Retained;
+use objc2::runtime::{AnyObject, Sel};
+use objc2::{DeclaredClass, MainThreadOnly, Message, define_class, msg_send, sel};
+use objc2_app_kit::{
+    NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
+    NSEventModifierFlags, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSTrackingArea,
+    NSTrackingAreaOptions, NSVariableStatusItemLength, NSView, NSWindow,
 };
-use tray_icon::{
-    Icon as NativeTrayIcon, MouseButton, MouseButtonState, Rect as NativeRect,
-    TrayIcon as NativeTrayIconHandle, TrayIconBuilder, TrayIconEvent,
-};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_graphics::{CGDisplayPixelsHigh, CGMainDisplayID};
+use objc2_foundation::{MainThreadMarker, NSObject, NSString};
 
+use self::accelerator::{key_equivalent, modifier_mask};
+use self::icon::to_nsimage;
+use self::util::strip_mnemonic;
 use crate::menu::Accelerator;
-use crate::model::{CommandState, NormalizedMenuItem, NormalizedTrayView};
+use crate::model::{CommandState, NormalizedCommandItem, NormalizedMenuItem, NormalizedTrayView};
 use crate::tray::{Builder, InteractionEvent, InteractionKind, RuntimePreference};
 use crate::{ClosedError, Error, Handle, Icon, Result, Tray, TrayEvent};
 
@@ -72,7 +78,6 @@ impl<T: Tray> PlatformHandle<T> {
 
         shared.render_or_log();
         shared.maybe_shutdown();
-
         Ok(result)
     }
 
@@ -89,7 +94,6 @@ impl<T: Tray> PlatformHandle<T> {
 
         shared.render_or_log();
         shared.maybe_shutdown();
-
         Ok(())
     }
 
@@ -131,8 +135,6 @@ where
         ));
     }
 
-    install_event_handlers();
-
     let Builder {
         tray,
         runtime_preference: _,
@@ -141,7 +143,7 @@ where
 
     let shared = Shared::new(tray)?;
     let tray_id = shared.state.borrow().tray_id.clone();
-    Shared::register(shared.clone());
+    shared.clone().register();
     shared.maybe_shutdown();
 
     Ok(Handle::new(tray_id, PlatformHandle::new(&shared)))
@@ -159,61 +161,48 @@ where
 
 trait RuntimeOps {
     fn on_menu_event(&self, menu_id: &str);
-    fn on_tray_icon_event(&self, event: &TrayIconEvent);
+    fn on_interaction(&self, event: InteractionEvent);
+    fn on_menu_tracking_changed(&self, open: bool);
 }
 
 #[derive(Default)]
 struct Registry {
     trays: HashMap<String, Rc<dyn RuntimeOps>>,
-    menus: HashMap<String, String>,
 }
 
 thread_local! {
     static REGISTRY: RefCell<Registry> = RefCell::new(Registry::default());
 }
 
-static EVENT_HANDLERS_INSTALLED: Once = Once::new();
-
-fn install_event_handlers() {
-    EVENT_HANDLERS_INSTALLED.call_once(|| {
-        TrayIconEvent::set_event_handler(Some(on_tray_icon_event));
-        NativeMenuEvent::set_event_handler(Some(on_menu_event));
-    });
+fn with_runtime<R>(tray_id: &str, f: impl FnOnce(&Rc<dyn RuntimeOps>) -> R) -> Option<R> {
+    REGISTRY.with(|registry| registry.borrow().trays.get(tray_id).map(f))
 }
 
-fn on_tray_icon_event(event: TrayIconEvent) {
-    let tray_id = event.id().as_ref().to_string();
-    let runtime = REGISTRY.with(|registry| registry.borrow().trays.get(&tray_id).cloned());
-    if let Some(runtime) = runtime {
-        runtime.on_tray_icon_event(&event);
-    }
+fn dispatch_menu_action(tray_id: &str, menu_id: &str) {
+    let _ = with_runtime(tray_id, |runtime| runtime.on_menu_event(menu_id));
 }
 
-fn on_menu_event(event: NativeMenuEvent) {
-    let menu_id = event.id.as_ref().to_string();
-    let runtime = REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let Some(tray_id) = registry.menus.get(&menu_id) else {
-            return None;
-        };
-        registry.trays.get(tray_id).cloned()
-    });
-    if let Some(runtime) = runtime {
-        runtime.on_menu_event(&menu_id);
-    }
+fn dispatch_interaction(tray_id: &str, event: InteractionEvent) {
+    let _ = with_runtime(tray_id, |runtime| runtime.on_interaction(event));
+}
+
+fn dispatch_menu_tracking(tray_id: &str, open: bool) {
+    let _ = with_runtime(tray_id, |runtime| runtime.on_menu_tracking_changed(open));
 }
 
 struct Shared<T: Tray> {
     closed: Cell<bool>,
+    menu_tracking: Cell<bool>,
+    pending_render: Cell<bool>,
     state: RefCell<State<T>>,
 }
 
 struct State<T: Tray> {
     tray_id: String,
     tray: T,
-    tray_icon: NativeTrayIconHandle,
+    native: NativeTray,
     menu_messages: HashMap<String, T::Message>,
-    registered_menu_ids: Vec<String>,
+    menu_model: Vec<NormalizedMenuItem<T::Message>>,
     has_menu: bool,
 }
 
@@ -222,18 +211,10 @@ impl<T: Tray> Shared<T> {
     where
         T::Message: Clone,
     {
-        let (tray_id, menu_ids) = {
-            let state = self.state.borrow();
-            (state.tray_id.clone(), state.registered_menu_ids.clone())
-        };
-
+        let tray_id = self.state.borrow().tray_id.clone();
         let runtime: Rc<dyn RuntimeOps> = self;
         REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            registry.trays.insert(tray_id.clone(), runtime);
-            for menu_id in menu_ids {
-                registry.menus.insert(menu_id, tray_id.clone());
-            }
+            registry.borrow_mut().trays.insert(tray_id, runtime);
         });
     }
 
@@ -242,8 +223,7 @@ impl<T: Tray> Shared<T> {
             return;
         }
 
-        let should_exit = self.state.borrow().tray.should_exit();
-        if should_exit {
+        if self.state.borrow().tray.should_exit() {
             self.shutdown();
         }
     }
@@ -253,22 +233,17 @@ impl<T: Tray> Shared<T> {
             return;
         }
 
-        let (tray_id, menu_ids) = {
+        let tray_id = {
             let mut state = self.state.borrow_mut();
             state.menu_messages.clear();
             state.has_menu = false;
-            (
-                state.tray_id.clone(),
-                mem::take(&mut state.registered_menu_ids),
-            )
+            let tray_id = state.tray_id.clone();
+            state.native.remove();
+            tray_id
         };
 
         REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            registry.trays.remove(&tray_id);
-            for menu_id in menu_ids {
-                registry.menus.remove(&menu_id);
-            }
+            registry.borrow_mut().trays.remove(&tray_id);
         });
     }
 }
@@ -278,40 +253,31 @@ where
     T::Message: Clone,
 {
     fn new(tray: T) -> Result<Rc<Self>> {
+        MainThreadMarker::new().ok_or(Error::Unsupported(
+            "macOS tray objects must be created and updated on the main thread",
+        ))?;
+
         let tray_id = tray.id().to_string();
         let view = NormalizedTrayView::from_tray(&tray);
-        let (menu, menu_messages, registered_menu_ids) = build_native_menu(&tray_id, &view.menu)?;
+        let menu_tree = if view.menu.is_empty() {
+            None
+        } else {
+            Some(NativeMenuTree::new(&tray_id, &view.menu)?)
+        };
 
-        let mut builder = TrayIconBuilder::new()
-            .with_id(tray_id.clone())
-            .with_menu_on_left_click(view.menu_on_primary_click);
-
-        if let Some(icon) = view.icon.as_ref() {
-            builder = builder.with_icon(to_tray_icon(icon)?);
-        }
-        if let Some(title) = view.title.as_deref() {
-            builder = builder.with_title(title);
-        }
-        if let Some(tooltip) = view.tooltip.as_deref() {
-            builder = builder.with_tooltip(tooltip);
-        }
-        if let Some(menu) = menu {
-            builder = builder.with_menu(Box::new(menu) as Box<dyn ContextMenu>);
-        }
-
-        let tray_icon = builder.build().map_err(map_tray_icon_error)?;
-        if !view.visible {
-            tray_icon.set_visible(false).map_err(map_tray_icon_error)?;
-        }
+        let native = NativeTray::new(&tray_id, &view, menu_tree)?;
+        let menu_messages = collect_menu_messages(&tray_id, &view.menu);
 
         Ok(Rc::new(Self {
             closed: Cell::new(false),
+            menu_tracking: Cell::new(false),
+            pending_render: Cell::new(false),
             state: RefCell::new(State {
                 tray_id,
                 tray,
-                tray_icon,
+                native,
                 menu_messages,
-                registered_menu_ids,
+                menu_model: view.menu,
                 has_menu: !view.menu.is_empty(),
             }),
         }))
@@ -322,51 +288,29 @@ where
             return Ok(());
         }
 
-        let (tray_id, old_menu_ids, new_menu_ids) = {
-            let mut state = self.state.borrow_mut();
-            let view = NormalizedTrayView::from_tray(&state.tray);
-            let (menu, menu_messages, registered_menu_ids) =
-                build_native_menu(&state.tray_id, &view.menu)?;
+        if self.menu_tracking.get() {
+            self.pending_render.set(true);
+            return Ok(());
+        }
 
-            state
-                .tray_icon
-                .set_icon(view.icon.as_ref().map(to_tray_icon).transpose()?)
-                .map_err(map_tray_icon_error)?;
-            state
-                .tray_icon
-                .set_tooltip(view.tooltip.as_deref())
-                .map_err(map_tray_icon_error)?;
-            state.tray_icon.set_title(view.title.as_deref());
-            state
-                .tray_icon
-                .set_visible(view.visible)
-                .map_err(map_tray_icon_error)?;
-            state
-                .tray_icon
-                .set_show_menu_on_left_click(view.menu_on_primary_click);
-            state
-                .tray_icon
-                .set_menu(menu.map(|menu| Box::new(menu) as Box<dyn ContextMenu>));
+        let mut state = self.state.borrow_mut();
+        let view = NormalizedTrayView::from_tray(&state.tray);
 
-            let tray_id = state.tray_id.clone();
-            let old_menu_ids = mem::take(&mut state.registered_menu_ids);
-            let new_menu_ids = registered_menu_ids.clone();
-            state.registered_menu_ids = registered_menu_ids;
-            state.menu_messages = menu_messages;
-            state.has_menu = !view.menu.is_empty();
-
-            (tray_id, old_menu_ids, new_menu_ids)
+        let menu_changed = menu_visuals_differ(&state.menu_model, &view.menu);
+        let menu_tree = if menu_changed {
+            if view.menu.is_empty() {
+                None
+            } else {
+                Some(NativeMenuTree::new(&state.tray_id, &view.menu)?)
+            }
+        } else {
+            None
         };
 
-        REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            for menu_id in old_menu_ids {
-                registry.menus.remove(&menu_id);
-            }
-            for menu_id in &new_menu_ids {
-                registry.menus.insert(menu_id.clone(), tray_id.clone());
-            }
-        });
+        state.native.apply_view(&view, menu_changed, menu_tree)?;
+        state.menu_messages = collect_menu_messages(&state.tray_id, &view.menu);
+        state.menu_model = view.menu;
+        state.has_menu = !state.menu_model.is_empty();
 
         Ok(())
     }
@@ -409,217 +353,628 @@ where
         }
     }
 
-    fn on_tray_icon_event(&self, event: &TrayIconEvent) {
+    fn on_interaction(&self, event: InteractionEvent) {
         if self.closed.get() {
             return;
         }
+        self.dispatch_tray_event(TrayEvent::Interaction(event));
+    }
 
-        let TrayIconEvent::Click {
-            position,
-            rect,
-            button,
-            button_state,
-            ..
-        } = event
-        else {
-            return;
+    fn on_menu_tracking_changed(&self, open: bool) {
+        self.menu_tracking.set(open);
+        if !open && self.pending_render.replace(false) {
+            self.render_or_log();
+            self.maybe_shutdown();
+        }
+    }
+}
+
+struct NativeTray {
+    tray_id: String,
+    status_item: Option<Retained<NSStatusItem>>,
+    tray_target: Option<Retained<TrayTarget>>,
+    menu_tree: Option<NativeMenuTree>,
+    mtm: MainThreadMarker,
+}
+
+impl NativeTray {
+    fn new<Message>(
+        tray_id: &str,
+        view: &NormalizedTrayView<Message>,
+        menu_tree: Option<NativeMenuTree>,
+    ) -> Result<Self> {
+        let mtm = MainThreadMarker::new().ok_or(Error::Unsupported(
+            "macOS tray objects must be created and updated on the main thread",
+        ))?;
+
+        let mut tray = Self {
+            tray_id: tray_id.to_string(),
+            status_item: None,
+            tray_target: None,
+            menu_tree,
+            mtm,
         };
 
-        if *button_state != MouseButtonState::Up {
-            return;
+        if view.visible {
+            tray.create_status_item(view)?;
         }
 
-        let (menu_on_primary_click, has_menu) = {
-            let state = self.state.borrow();
-            (state.tray.menu_on_primary_click(), state.has_menu)
+        Ok(tray)
+    }
+
+    fn apply_view<Message>(
+        &mut self,
+        view: &NormalizedTrayView<Message>,
+        replace_menu: bool,
+        menu_tree: Option<NativeMenuTree>,
+    ) -> Result<()> {
+        if replace_menu {
+            self.menu_tree = menu_tree;
+        }
+
+        if !view.visible {
+            self.remove();
+            return Ok(());
+        }
+
+        if self.status_item.is_none() {
+            self.create_status_item(view)?;
+            return Ok(());
+        }
+
+        if let Some(status_item) = self.status_item.as_deref() {
+            set_status_item_icon(status_item, view.icon.as_ref(), self.mtm)?;
+            set_status_item_title(status_item, view.title.as_deref(), self.mtm);
+            set_status_item_tooltip(status_item, view.tooltip.as_deref(), self.mtm);
+        }
+
+        if let Some(tray_target) = self.tray_target.as_deref() {
+            tray_target
+                .ivars()
+                .menu_on_left_click
+                .set(view.menu_on_primary_click);
+            tray_target.update_dimensions();
+        }
+
+        if replace_menu {
+            self.attach_menu();
+        }
+
+        Ok(())
+    }
+
+    fn create_status_item<Message>(&mut self, view: &NormalizedTrayView<Message>) -> Result<()> {
+        let status_item = unsafe {
+            NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength)
         };
 
-        let kind = match button {
-            MouseButton::Left if !(menu_on_primary_click && has_menu) => {
-                Some(InteractionKind::PrimaryActivate)
-            },
-            MouseButton::Right if !has_menu => Some(InteractionKind::ContextMenu),
-            MouseButton::Middle => Some(InteractionKind::SecondaryActivate),
-            _ => None,
+        set_status_item_icon(&status_item, view.icon.as_ref(), self.mtm)?;
+        set_status_item_title(&status_item, view.title.as_deref(), self.mtm);
+        set_status_item_tooltip(&status_item, view.tooltip.as_deref(), self.mtm);
+
+        let tray_target = unsafe {
+            let button = status_item.button(self.mtm).unwrap();
+            let frame = button.frame();
+            let target = self.mtm.alloc().set_ivars(TrayTargetIvars {
+                tray_id: NSString::from_str(&self.tray_id),
+                menu: RefCell::new(None),
+                status_item: status_item.retain(),
+                menu_on_left_click: Cell::new(view.menu_on_primary_click),
+            });
+            let tray_target: Retained<TrayTarget> = msg_send![super(target), initWithFrame: frame];
+            tray_target.setWantsLayer(true);
+            button.addSubview(&tray_target);
+            tray_target
         };
 
-        if let Some(kind) = kind {
-            self.dispatch_tray_event(TrayEvent::Interaction(InteractionEvent {
+        self.status_item = Some(status_item);
+        self.tray_target = Some(tray_target);
+        self.attach_menu();
+        Ok(())
+    }
+
+    fn attach_menu(&mut self) {
+        let Some(status_item) = self.status_item.as_deref() else {
+            return;
+        };
+        let Some(tray_target) = self.tray_target.as_deref() else {
+            return;
+        };
+
+        unsafe {
+            if let Some(menu_tree) = &self.menu_tree {
+                status_item.setMenu(Some(&menu_tree.root));
+                let () = msg_send![&*menu_tree.root, setDelegate: &*menu_tree.delegate];
+                *tray_target.ivars().menu.borrow_mut() = Some(menu_tree.root.retain());
+            } else {
+                status_item.setMenu(None);
+                *tray_target.ivars().menu.borrow_mut() = None;
+            }
+        }
+    }
+
+    fn remove(&mut self) {
+        if let (Some(status_item), Some(tray_target)) = (&self.status_item, &self.tray_target) {
+            unsafe {
+                NSStatusBar::systemStatusBar().removeStatusItem(status_item);
+                tray_target.removeFromSuperview();
+            }
+        }
+
+        self.status_item = None;
+        self.tray_target = None;
+    }
+}
+
+impl Drop for NativeTray {
+    fn drop(&mut self) {
+        self.remove();
+    }
+}
+
+struct NativeMenuTree {
+    root: Retained<NSMenu>,
+    delegate: Retained<MenuDelegate>,
+    _action_states: Vec<Rc<MenuActionState>>,
+}
+
+impl NativeMenuTree {
+    fn new<Message>(tray_id: &str, items: &[NormalizedMenuItem<Message>]) -> Result<Self> {
+        let mtm = MainThreadMarker::new().ok_or(Error::Unsupported(
+            "macOS menus must be created on the main thread",
+        ))?;
+        let root = NSMenu::new(mtm);
+        unsafe {
+            root.setAutoenablesItems(false);
+        }
+        let delegate = MenuDelegate::new(mtm, tray_id);
+        unsafe {
+            let () = msg_send![&*root, setDelegate: &*delegate];
+        }
+
+        let mut action_states = Vec::new();
+        let mut path = Vec::new();
+        for (index, item) in items.iter().enumerate() {
+            path.push(index);
+            append_menu_item(&root, tray_id, &mut path, item, &mut action_states, mtm)?;
+            path.pop();
+        }
+
+        Ok(Self {
+            root,
+            delegate,
+            _action_states: action_states,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct MenuActionState {
+    tray_id: String,
+    menu_id: String,
+}
+
+#[derive(Debug)]
+struct TrayTargetIvars {
+    tray_id: Retained<NSString>,
+    menu: RefCell<Option<Retained<NSMenu>>>,
+    status_item: Retained<NSStatusItem>,
+    menu_on_left_click: Cell<bool>,
+}
+
+define_class!(
+    #[unsafe(super(NSView))]
+    #[name = "TrayinitTrayTarget"]
+    #[ivars = TrayTargetIvars]
+    struct TrayTarget;
+
+    impl TrayTarget {
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, _event: &NSEvent) {
+            show_menu_if_needed(self, MouseButton::Left);
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            let mtm = MainThreadMarker::from(self);
+            unsafe {
+                let button = self.ivars().status_item.button(mtm).unwrap();
+                button.highlight(false);
+            }
+
+            let has_menu = tray_target_has_menu(self);
+            if !(self.ivars().menu_on_left_click.get() && has_menu) {
+                dispatch_interaction_from_event(self, event, InteractionKind::PrimaryActivate);
+            }
+        }
+
+        #[unsafe(method(rightMouseDown:))]
+        fn right_mouse_down(&self, _event: &NSEvent) {
+            show_menu_if_needed(self, MouseButton::Right);
+        }
+
+        #[unsafe(method(rightMouseUp:))]
+        fn right_mouse_up(&self, event: &NSEvent) {
+            if !tray_target_has_menu(self) {
+                dispatch_interaction_from_event(self, event, InteractionKind::ContextMenu);
+            }
+        }
+
+        #[unsafe(method(otherMouseUp:))]
+        fn other_mouse_up(&self, event: &NSEvent) {
+            if unsafe { event.buttonNumber() } == 2 {
+                dispatch_interaction_from_event(self, event, InteractionKind::SecondaryActivate);
+            }
+        }
+
+        #[unsafe(method(updateTrackingAreas))]
+        fn update_tracking_areas(&self) {
+            unsafe {
+                let areas = self.trackingAreas();
+                for area in areas {
+                    self.removeTrackingArea(&area);
+                }
+
+                let _: () = msg_send![super(self), updateTrackingAreas];
+
+                let options = NSTrackingAreaOptions::MouseEnteredAndExited
+                    | NSTrackingAreaOptions::MouseMoved
+                    | NSTrackingAreaOptions::ActiveAlways
+                    | NSTrackingAreaOptions::InVisibleRect;
+                let rect = CGRect {
+                    origin: CGPoint { x: 0.0, y: 0.0 },
+                    size: CGSize {
+                        width: 0.0,
+                        height: 0.0,
+                    },
+                };
+                let area = NSTrackingArea::initWithRect_options_owner_userInfo(
+                    NSTrackingArea::alloc(),
+                    rect,
+                    options,
+                    Some(self),
+                    None,
+                );
+                self.addTrackingArea(&area);
+            }
+        }
+    }
+);
+
+impl TrayTarget {
+    fn update_dimensions(&self) {
+        let mtm = MainThreadMarker::from(self);
+        unsafe {
+            let button = self.ivars().status_item.button(mtm).unwrap();
+            self.setFrame(button.frame());
+        }
+    }
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[name = "TrayinitMenuDelegate"]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = Retained<NSString>]
+    struct MenuDelegate;
+
+    impl MenuDelegate {
+        #[unsafe(method(menuWillOpen:))]
+        fn menu_will_open(&self, _menu: &NSMenu) {
+            dispatch_menu_tracking(&self.ivars().to_string(), true);
+        }
+
+        #[unsafe(method(menuDidClose:))]
+        fn menu_did_close(&self, _menu: &NSMenu) {
+            dispatch_menu_tracking(&self.ivars().to_string(), false);
+        }
+    }
+);
+
+impl MenuDelegate {
+    fn new(mtm: MainThreadMarker, tray_id: &str) -> Retained<Self> {
+        let this = mtm.alloc().set_ivars(NSString::from_str(tray_id));
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+define_class!(
+    #[unsafe(super(NSMenuItem))]
+    #[name = "TrayinitMenuItem"]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = Cell<*const MenuActionState>]
+    struct ActionMenuItem;
+
+    impl ActionMenuItem {
+        #[unsafe(method(fireMenuItemAction:))]
+        fn fire_menu_item_action(&self, _sender: Option<&AnyObject>) {
+            let Some(state) = (unsafe { self.ivars().get().as_ref() }) else {
+                return;
+            };
+            dispatch_menu_action(&state.tray_id, &state.menu_id);
+        }
+    }
+);
+
+impl ActionMenuItem {
+    fn new(
+        mtm: MainThreadMarker,
+        title: &str,
+        action: Option<Sel>,
+        accelerator: Option<&Accelerator>,
+    ) -> Result<Retained<Self>> {
+        let title = NSString::from_str(title);
+        let key_equivalent = accelerator
+            .map(key_equivalent)
+            .transpose()
+            .map_err(Error::Accelerator)?
+            .unwrap_or_default();
+        let key_equivalent = NSString::from_str(&key_equivalent);
+        let modifier_mask = accelerator
+            .map(modifier_mask)
+            .transpose()
+            .map_err(Error::Accelerator)?
+            .unwrap_or_else(NSEventModifierFlags::empty);
+
+        let this = mtm.alloc().set_ivars(Cell::new(ptr::null()));
+        let item: Retained<Self> = unsafe {
+            msg_send![super(this), initWithTitle: &title, action: action, keyEquivalent: &key_equivalent]
+        };
+        item.setKeyEquivalentModifierMask(modifier_mask);
+        Ok(item)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MouseButton {
+    Left,
+    Right,
+}
+
+fn show_menu_if_needed(this: &TrayTarget, button: MouseButton) {
+    let mtm = MainThreadMarker::from(this);
+    unsafe {
+        let ns_button = this.ivars().status_item.button(mtm).unwrap();
+        let menu_on_left_click = this.ivars().menu_on_left_click.get();
+        let has_menu = tray_target_has_menu(this);
+
+        if button == MouseButton::Right || (menu_on_left_click && button == MouseButton::Left) {
+            if has_menu {
+                ns_button.performClick(None);
+            } else {
+                ns_button.highlight(true);
+            }
+        } else {
+            ns_button.highlight(true);
+        }
+    }
+}
+
+fn tray_target_has_menu(this: &TrayTarget) -> bool {
+    if let Some(menu) = &*this.ivars().menu.borrow() {
+        menu.numberOfItems() > 0
+    } else {
+        false
+    }
+}
+
+fn dispatch_interaction_from_event(this: &TrayTarget, event: &NSEvent, kind: InteractionKind) {
+    let mtm = MainThreadMarker::from(this);
+    let tray_id = this.ivars().tray_id.to_string();
+
+    unsafe {
+        let window = event.window(mtm).unwrap();
+        let icon_rect = tray_rect(&window);
+        let mouse_location = NSEvent::mouseLocation();
+        let scale_factor = window.backingScaleFactor();
+        let cursor_position = dpi::LogicalPosition::new(
+            mouse_location.x,
+            flip_window_screen_coordinates(mouse_location.y),
+        )
+        .to_physical(scale_factor);
+
+        dispatch_interaction(
+            &tray_id,
+            InteractionEvent {
                 kind,
-                position: Some(position_from_native(*position)),
-                area: Some(area_from_native(rect)),
-            }));
+                position: Some(dpi::PhysicalPosition::new(
+                    cursor_position.x.round() as i32,
+                    cursor_position.y.round() as i32,
+                )),
+                area: Some(icon_rect),
+            },
+        );
+    }
+}
+
+fn tray_rect(window: &NSWindow) -> (dpi::PhysicalPosition<i32>, dpi::PhysicalSize<i32>) {
+    let frame = window.frame();
+    let scale_factor = window.backingScaleFactor();
+    let rect = (
+        dpi::LogicalPosition::new(
+            frame.origin.x,
+            flip_window_screen_coordinates(frame.origin.y) - frame.size.height,
+        )
+        .to_physical(scale_factor),
+        dpi::LogicalSize::new(frame.size.width, frame.size.height).to_physical(scale_factor),
+    );
+
+    (
+        dpi::PhysicalPosition::new(rect.0.x.round() as i32, rect.0.y.round() as i32),
+        dpi::PhysicalSize::new(rect.1.width.round() as i32, rect.1.height.round() as i32),
+    )
+}
+
+fn flip_window_screen_coordinates(y: f64) -> f64 {
+    unsafe { CGDisplayPixelsHigh(CGMainDisplayID()) as f64 - y }
+}
+
+fn set_status_item_icon(
+    status_item: &NSStatusItem,
+    icon: Option<&Icon>,
+    mtm: MainThreadMarker,
+) -> Result<()> {
+    let button = unsafe { status_item.button(mtm).unwrap() };
+
+    if let Some(icon) = icon {
+        let nsimage = to_nsimage(icon, Some(18.0))?;
+        unsafe {
+            button.setImage(Some(&nsimage));
+            button.setImagePosition(NSCellImagePosition::ImageLeft);
+        }
+    } else {
+        unsafe {
+            button.setImage(None);
+        }
+    }
+
+    Ok(())
+}
+
+fn set_status_item_title(status_item: &NSStatusItem, title: Option<&str>, mtm: MainThreadMarker) {
+    unsafe {
+        if let Some(button) = status_item.button(mtm) {
+            let title = NSString::from_str(title.unwrap_or_default());
+            button.setTitle(&title);
         }
     }
 }
 
-fn build_native_menu<Message: Clone>(
-    tray_id: &str,
-    items: &[NormalizedMenuItem<Message>],
-) -> Result<(Option<NativeMenu>, HashMap<String, Message>, Vec<String>)> {
-    if items.is_empty() {
-        return Ok((None, HashMap::new(), Vec::new()));
-    }
-
-    let menu = NativeMenu::new();
-    let mut menu_messages = HashMap::new();
-    let mut registered_menu_ids = Vec::new();
-    let mut path = Vec::new();
-
-    for (index, item) in items.iter().enumerate() {
-        path.push(index);
-        append_normalized_item(
-            &menu,
-            tray_id,
-            &mut path,
-            item,
-            &mut menu_messages,
-            &mut registered_menu_ids,
-        )?;
-        path.pop();
-    }
-
-    Ok((Some(menu), menu_messages, registered_menu_ids))
-}
-
-trait NativeMenuParent {
-    fn append_item(&self, item: &dyn IsMenuItem) -> native_menu::Result<()>;
-}
-
-impl NativeMenuParent for NativeMenu {
-    fn append_item(&self, item: &dyn IsMenuItem) -> native_menu::Result<()> {
-        self.append(item)
+fn set_status_item_tooltip(
+    status_item: &NSStatusItem,
+    tooltip: Option<&str>,
+    mtm: MainThreadMarker,
+) {
+    unsafe {
+        if let Some(button) = status_item.button(mtm) {
+            let tooltip = tooltip.map(NSString::from_str);
+            button.setToolTip(tooltip.as_deref());
+        }
     }
 }
 
-impl NativeMenuParent for NativeSubmenu {
-    fn append_item(&self, item: &dyn IsMenuItem) -> native_menu::Result<()> {
-        self.append(item)
-    }
-}
-
-fn append_normalized_item<P, Message: Clone>(
-    parent: &P,
+fn append_menu_item<Message>(
+    parent: &NSMenu,
     tray_id: &str,
     path: &mut Vec<usize>,
     item: &NormalizedMenuItem<Message>,
-    menu_messages: &mut HashMap<String, Message>,
-    registered_menu_ids: &mut Vec<String>,
-) -> Result<()>
-where
-    P: NativeMenuParent,
-{
+    action_states: &mut Vec<Rc<MenuActionState>>,
+    mtm: MainThreadMarker,
+) -> Result<()> {
     match item {
-        NormalizedMenuItem::Standard(item) => append_command_item(
-            parent,
-            tray_id,
-            path,
-            item,
-            menu_messages,
-            registered_menu_ids,
-            false,
-        ),
-        NormalizedMenuItem::Check(item) | NormalizedMenuItem::Radio(item) => append_command_item(
-            parent,
-            tray_id,
-            path,
-            item,
-            menu_messages,
-            registered_menu_ids,
-            true,
-        ),
+        NormalizedMenuItem::Standard(item) => {
+            let menu_item =
+                build_action_menu_item(tray_id, path, item, action_states, mtm, false, false)?;
+            parent.addItem(&menu_item);
+        },
+        NormalizedMenuItem::Check(item) => {
+            let menu_item =
+                build_action_menu_item(tray_id, path, item, action_states, mtm, true, false)?;
+            parent.addItem(&menu_item);
+        },
+        NormalizedMenuItem::Radio(item) => {
+            let menu_item =
+                build_action_menu_item(tray_id, path, item, action_states, mtm, false, true)?;
+            parent.addItem(&menu_item);
+        },
         NormalizedMenuItem::Submenu(submenu) => {
-            let id = native_menu_id(tray_id, path);
-            let native =
-                NativeSubmenu::with_id(NativeMenuId::new(&id), &submenu.label, submenu.enabled);
-            if let Some(icon) = submenu.icon.as_ref() {
-                native.set_icon(Some(to_menu_icon(icon)?));
+            let submenu_menu = NSMenu::new(mtm);
+            unsafe {
+                submenu_menu.setAutoenablesItems(false);
             }
 
             for (index, child) in submenu.children.iter().enumerate() {
                 path.push(index);
-                append_normalized_item(
-                    &native,
-                    tray_id,
-                    path,
-                    child,
-                    menu_messages,
-                    registered_menu_ids,
-                )?;
+                append_menu_item(&submenu_menu, tray_id, path, child, action_states, mtm)?;
                 path.pop();
             }
 
-            parent.append_item(&native).map_err(map_menu_error)
+            let title = strip_mnemonic(&submenu.label);
+            let menu_item = ActionMenuItem::new(mtm, &title, None, None)?;
+            unsafe {
+                menu_item.setEnabled(submenu.enabled);
+                menu_item.setSubmenu(Some(&submenu_menu));
+            }
+            if let Some(icon) = submenu.icon.as_ref() {
+                set_menu_item_icon(&menu_item, Some(icon))?;
+            }
+            parent.addItem(&menu_item);
         },
-        NormalizedMenuItem::Separator => parent
-            .append_item(&NativePredefinedMenuItem::separator())
-            .map_err(map_menu_error),
+        NormalizedMenuItem::Separator => {
+            parent.addItem(&NSMenuItem::separatorItem(mtm));
+        },
     }
+
+    Ok(())
 }
 
-fn append_command_item<P, Message: Clone>(
-    parent: &P,
+fn build_action_menu_item<Message>(
     tray_id: &str,
     path: &[usize],
-    item: &crate::model::NormalizedCommandItem<Message>,
-    menu_messages: &mut HashMap<String, Message>,
-    registered_menu_ids: &mut Vec<String>,
-    uses_check_state: bool,
-) -> Result<()>
-where
-    P: NativeMenuParent,
-{
-    let id = native_menu_id(tray_id, path);
-    let accelerator = item.accelerator.as_ref().map(to_native_accelerator);
+    item: &NormalizedCommandItem<Message>,
+    action_states: &mut Vec<Rc<MenuActionState>>,
+    mtm: MainThreadMarker,
+    is_check: bool,
+    is_radio: bool,
+) -> Result<Retained<ActionMenuItem>> {
+    let title = strip_mnemonic(&item.label);
+    let action = if item.message.is_some() {
+        Some(sel!(fireMenuItemAction:))
+    } else {
+        None
+    };
+    let menu_item = ActionMenuItem::new(mtm, &title, action, item.accelerator.as_ref())?;
 
-    match (&item.state, uses_check_state, item.icon.as_ref()) {
-        (CommandState::Standard, _, Some(icon)) => {
-            let native = IconMenuItem::with_id(
-                NativeMenuId::new(&id),
-                &item.label,
-                item.enabled,
-                Some(to_menu_icon(icon)?),
-                accelerator,
-            );
-            parent.append_item(&native).map_err(map_menu_error)?;
-        },
-        (CommandState::Standard, _, None) => {
-            let native = NativeMenuItem::with_id(
-                NativeMenuId::new(&id),
-                &item.label,
-                item.enabled,
-                accelerator,
-            );
-            parent.append_item(&native).map_err(map_menu_error)?;
-        },
-        (CommandState::Check { checked }, _, _)
-        | (CommandState::Radio { selected: checked }, true, _) => {
-            let native = NativeCheckMenuItem::with_id(
-                NativeMenuId::new(&id),
-                &item.label,
-                item.enabled,
-                *checked,
-                accelerator,
-            );
-            parent.append_item(&native).map_err(map_menu_error)?;
-        },
-        (CommandState::Radio { selected }, false, _) => {
-            let native = NativeCheckMenuItem::with_id(
-                NativeMenuId::new(&id),
-                &item.label,
-                item.enabled,
-                *selected,
-                accelerator,
-            );
-            parent.append_item(&native).map_err(map_menu_error)?;
-        },
+    unsafe {
+        if action.is_some() {
+            menu_item.setTarget(Some(&menu_item));
+        }
+        menu_item.setEnabled(item.enabled);
     }
 
-    if let Some(message) = item.message.as_ref() {
-        menu_messages.insert(id.clone(), message.clone());
-        registered_menu_ids.push(id);
+    if let Some(icon) = item.icon.as_ref() {
+        set_menu_item_icon(&menu_item, Some(icon))?;
     }
 
+    if is_check {
+        let checked = matches!(item.state, CommandState::Check { checked: true });
+        menu_item.setState(if checked {
+            NSControlStateValueOn
+        } else {
+            NSControlStateValueOff
+        });
+    } else if is_radio {
+        let selected = matches!(item.state, CommandState::Radio { selected: true });
+        menu_item.setState(if selected {
+            NSControlStateValueOn
+        } else {
+            NSControlStateValueOff
+        });
+    }
+
+    if item.message.is_some() {
+        let state = Rc::new(MenuActionState {
+            tray_id: tray_id.to_string(),
+            menu_id: native_menu_id(tray_id, path),
+        });
+        menu_item.ivars().set(Rc::as_ptr(&state));
+        action_states.push(state);
+    }
+
+    Ok(menu_item)
+}
+
+fn set_menu_item_icon(menu_item: &NSMenuItem, icon: Option<&Icon>) -> Result<()> {
+    if let Some(icon) = icon {
+        let nsimage = to_nsimage(icon, Some(18.0))?;
+        unsafe {
+            menu_item.setImage(Some(&nsimage));
+        }
+    } else {
+        unsafe {
+            menu_item.setImage(None);
+        }
+    }
     Ok(())
 }
 
@@ -636,41 +991,68 @@ fn native_menu_id(tray_id: &str, path: &[usize]) -> String {
     id
 }
 
-fn to_tray_icon(icon: &Icon) -> Result<NativeTrayIcon> {
-    NativeTrayIcon::from_rgba(icon.rgba().to_vec(), icon.width(), icon.height())
-        .map_err(|error| Error::Backend(error.to_string()))
+fn collect_menu_messages<Message: Clone>(
+    tray_id: &str,
+    items: &[NormalizedMenuItem<Message>],
+) -> HashMap<String, Message> {
+    let mut messages = HashMap::new();
+    let mut path = Vec::new();
+    collect_menu_messages_inner(tray_id, items, &mut path, &mut messages);
+    messages
 }
 
-fn to_menu_icon(icon: &Icon) -> Result<NativeMenuIcon> {
-    NativeMenuIcon::from_rgba(icon.rgba().to_vec(), icon.width(), icon.height())
-        .map_err(|error| Error::Backend(error.to_string()))
-}
-
-fn to_native_accelerator(accelerator: &Accelerator) -> NativeAccelerator {
-    NativeAccelerator::new(Some(accelerator.modifiers()), accelerator.key())
-}
-
-fn map_menu_error(error: native_menu::Error) -> Error {
-    Error::Backend(error.to_string())
-}
-
-fn map_tray_icon_error(error: tray_icon::Error) -> Error {
-    match error {
-        tray_icon::Error::NotMainThread => {
-            Error::Unsupported("macOS tray objects must be created and updated on the main thread")
-        },
-        tray_icon::Error::OsError(error) => Error::Os(error),
-        other => Error::Backend(other.to_string()),
+fn collect_menu_messages_inner<Message: Clone>(
+    tray_id: &str,
+    items: &[NormalizedMenuItem<Message>],
+    path: &mut Vec<usize>,
+    messages: &mut HashMap<String, Message>,
+) {
+    for (index, item) in items.iter().enumerate() {
+        path.push(index);
+        match item {
+            NormalizedMenuItem::Standard(item)
+            | NormalizedMenuItem::Check(item)
+            | NormalizedMenuItem::Radio(item) => {
+                if let Some(message) = item.message.as_ref() {
+                    messages.insert(native_menu_id(tray_id, path), message.clone());
+                }
+            },
+            NormalizedMenuItem::Submenu(submenu) => {
+                collect_menu_messages_inner(tray_id, &submenu.children, path, messages);
+            },
+            NormalizedMenuItem::Separator => {},
+        }
+        path.pop();
     }
 }
 
-fn position_from_native(position: tray_icon::dpi::PhysicalPosition<f64>) -> PhysicalPosition<i32> {
-    PhysicalPosition::new(position.x.round() as i32, position.y.round() as i32)
-}
+fn menu_visuals_differ<Message>(
+    old: &[NormalizedMenuItem<Message>],
+    new: &[NormalizedMenuItem<Message>],
+) -> bool {
+    if old.len() != new.len() {
+        return true;
+    }
 
-fn area_from_native(rect: &NativeRect) -> (PhysicalPosition<i32>, PhysicalSize<i32>) {
-    (
-        position_from_native(rect.position),
-        PhysicalSize::new(rect.size.width as i32, rect.size.height as i32),
-    )
+    old.iter().zip(new).any(|(old, new)| match (old, new) {
+        (NormalizedMenuItem::Standard(old), NormalizedMenuItem::Standard(new))
+        | (NormalizedMenuItem::Check(old), NormalizedMenuItem::Check(new))
+        | (NormalizedMenuItem::Radio(old), NormalizedMenuItem::Radio(new)) => {
+            old.label != new.label
+                || old.enabled != new.enabled
+                || old.icon != new.icon
+                || old.icon_name != new.icon_name
+                || old.accelerator != new.accelerator
+                || old.state != new.state
+        },
+        (NormalizedMenuItem::Submenu(old), NormalizedMenuItem::Submenu(new)) => {
+            old.label != new.label
+                || old.enabled != new.enabled
+                || old.icon != new.icon
+                || old.icon_name != new.icon_name
+                || menu_visuals_differ(&old.children, &new.children)
+        },
+        (NormalizedMenuItem::Separator, NormalizedMenuItem::Separator) => false,
+        _ => true,
+    })
 }

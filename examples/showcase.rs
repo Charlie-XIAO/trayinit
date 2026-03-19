@@ -143,6 +143,13 @@ impl Tray for ShowcaseTray {
 fn main() {
     tracing_subscriber::fmt::init();
 
+    #[cfg(target_os = "macos")]
+    {
+        eprintln!("This example uses spawn(), which is not implemented on macOS yet.");
+        eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
+        return;
+    }
+
     let keep_running = Arc::new(AtomicBool::new(true));
     let tray = ShowcaseTray {
         ticks_enabled: true,

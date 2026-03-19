@@ -44,4 +44,34 @@ tokio = { version = "1", features = ["macros", "rt", "sync"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
-tray-icon = "0.21.3"
+objc2 = "0.6"
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGDirectDisplay"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
+  "NSData",
+  "NSGeometry",
+  "NSObject",
+  "NSString",
+  "NSThread",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
+  "NSButton",
+  "NSCell",
+  "NSControl",
+  "NSEvent",
+  "NSImage",
+  "NSMenu",
+  "NSMenuItem",
+  "NSResponder",
+  "NSStatusBar",
+  "NSStatusBarButton",
+  "NSStatusItem",
+  "NSTrackingArea",
+  "NSView",
+  "NSWindow",
+] }
+png = "0.17"
