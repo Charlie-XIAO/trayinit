@@ -218,7 +218,10 @@ struct State<T: Tray> {
 }
 
 impl<T: Tray> Shared<T> {
-    fn register(self: Rc<Self>) {
+    fn register(self: Rc<Self>)
+    where
+        T::Message: Clone,
+    {
         let (tray_id, menu_ids) = {
             let state = self.state.borrow();
             (state.tray_id.clone(), state.registered_menu_ids.clone())
