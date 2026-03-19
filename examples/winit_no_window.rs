@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(target_os = "macos"))]
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -66,7 +67,10 @@ impl Tray for WinitTray {
 struct App {
     tray: Option<Handle<WinitTray>>,
     keep_running: Arc<AtomicBool>,
+    #[cfg(not(target_os = "macos"))]
     ticker_started: bool,
+    #[cfg(target_os = "macos")]
+    last_tick: Instant,
 }
 
 impl ApplicationHandler for App {
@@ -78,31 +82,34 @@ impl ApplicationHandler for App {
                 keep_running: Arc::clone(&self.keep_running),
             };
             let handle = tray.attach().expect("attach winit tray example");
-            let ticker_handle = handle.clone();
-            let ticker_running = Arc::clone(&self.keep_running);
+            #[cfg(not(target_os = "macos"))]
+            {
+                let ticker_handle = handle.clone();
+                let ticker_running = Arc::clone(&self.keep_running);
 
-            if !self.ticker_started {
-                self.ticker_started = true;
-                thread::spawn(move || {
-                    while ticker_running.load(Ordering::Relaxed) {
-                        thread::sleep(Duration::from_secs(1));
+                if !self.ticker_started {
+                    self.ticker_started = true;
+                    thread::spawn(move || {
+                        while ticker_running.load(Ordering::Relaxed) {
+                            thread::sleep(Duration::from_secs(1));
 
-                        if !ticker_running.load(Ordering::Relaxed) {
-                            break;
+                            if !ticker_running.load(Ordering::Relaxed) {
+                                break;
+                            }
+
+                            if ticker_handle
+                                .update(|tray| {
+                                    if tray.ticking {
+                                        tray.ticks = tray.ticks.saturating_add(1);
+                                    }
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
-
-                        if ticker_handle
-                            .update(|tray| {
-                                if tray.ticking {
-                                    tray.ticks = tray.ticks.saturating_add(1);
-                                }
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                });
+                    });
+                }
             }
 
             self.tray = Some(handle);
@@ -114,6 +121,24 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "macos")]
+        if let Some(handle) = self.tray.as_ref() {
+            let now = Instant::now();
+            if now.duration_since(self.last_tick) >= Duration::from_secs(1) {
+                self.last_tick = now;
+                if handle
+                    .update(|tray| {
+                        if tray.ticking {
+                            tray.ticks = tray.ticks.saturating_add(1);
+                        }
+                    })
+                    .is_err()
+                {
+                    self.keep_running.store(false, Ordering::Relaxed);
+                }
+            }
+        }
+
         if !self.keep_running.load(Ordering::Relaxed) {
             if let Some(tray) = self.tray.take() {
                 let _ = tray.shutdown();
@@ -149,7 +174,10 @@ fn main() {
     let mut app = App {
         tray: None,
         keep_running: Arc::new(AtomicBool::new(true)),
+        #[cfg(not(target_os = "macos"))]
         ticker_started: false,
+        #[cfg(target_os = "macos")]
+        last_tick: Instant::now(),
     };
 
     event_loop.run_app(&mut app).expect("run winit app");
