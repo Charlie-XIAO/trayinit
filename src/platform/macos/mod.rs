@@ -15,7 +15,7 @@ use std::{fmt, ptr, thread_local};
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
-use objc2::{DeclaredClass, MainThreadOnly, Message, define_class, msg_send, sel};
+use objc2::{AnyThread, DeclaredClass, MainThreadOnly, Message, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
     NSEventModifierFlags, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSTrackingArea,
@@ -267,6 +267,7 @@ where
 
         let native = NativeTray::new(&tray_id, &view, menu_tree)?;
         let menu_messages = collect_menu_messages(&tray_id, &view.menu);
+        let has_menu = !view.menu.is_empty();
 
         Ok(Rc::new(Self {
             closed: Cell::new(false),
@@ -278,7 +279,7 @@ where
                 native,
                 menu_messages,
                 menu_model: view.menu,
-                has_menu: !view.menu.is_empty(),
+                has_menu,
             }),
         }))
     }
@@ -611,7 +612,7 @@ define_class!(
         fn update_tracking_areas(&self) {
             unsafe {
                 let areas = self.trackingAreas();
-                for area in areas {
+                for area in &areas {
                     self.removeTrackingArea(&area);
                 }
 
@@ -718,7 +719,7 @@ impl ActionMenuItem {
 
         let this = mtm.alloc().set_ivars(Cell::new(ptr::null()));
         let item: Retained<Self> = unsafe {
-            msg_send![super(this), initWithTitle: &title, action: action, keyEquivalent: &key_equivalent]
+            msg_send![super(this), initWithTitle: &*title, action: action, keyEquivalent: &*key_equivalent]
         };
         item.setKeyEquivalentModifierMask(modifier_mask);
         Ok(item)
@@ -767,7 +768,7 @@ fn dispatch_interaction_from_event(this: &TrayTarget, event: &NSEvent, kind: Int
         let icon_rect = tray_rect(&window);
         let mouse_location = NSEvent::mouseLocation();
         let scale_factor = window.backingScaleFactor();
-        let cursor_position = dpi::LogicalPosition::new(
+        let cursor_position: dpi::PhysicalPosition<f64> = dpi::LogicalPosition::new(
             mouse_location.x,
             flip_window_screen_coordinates(mouse_location.y),
         )
@@ -790,18 +791,17 @@ fn dispatch_interaction_from_event(this: &TrayTarget, event: &NSEvent, kind: Int
 fn tray_rect(window: &NSWindow) -> (dpi::PhysicalPosition<i32>, dpi::PhysicalSize<i32>) {
     let frame = window.frame();
     let scale_factor = window.backingScaleFactor();
-    let rect = (
-        dpi::LogicalPosition::new(
-            frame.origin.x,
-            flip_window_screen_coordinates(frame.origin.y) - frame.size.height,
-        )
-        .to_physical(scale_factor),
-        dpi::LogicalSize::new(frame.size.width, frame.size.height).to_physical(scale_factor),
-    );
+    let position: dpi::PhysicalPosition<f64> = dpi::LogicalPosition::new(
+        frame.origin.x,
+        flip_window_screen_coordinates(frame.origin.y) - frame.size.height,
+    )
+    .to_physical(scale_factor);
+    let size: dpi::PhysicalSize<f64> =
+        dpi::LogicalSize::new(frame.size.width, frame.size.height).to_physical(scale_factor);
 
     (
-        dpi::PhysicalPosition::new(rect.0.x.round() as i32, rect.0.y.round() as i32),
-        dpi::PhysicalSize::new(rect.1.width.round() as i32, rect.1.height.round() as i32),
+        dpi::PhysicalPosition::new(position.x.round() as i32, position.y.round() as i32),
+        dpi::PhysicalSize::new(size.width.round() as i32, size.height.round() as i32),
     )
 }
 

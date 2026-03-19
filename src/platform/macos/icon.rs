@@ -1,5 +1,6 @@
 use std::io::Cursor;
 
+use objc2::AnyThread;
 use objc2::rc::Retained;
 use objc2_app_kit::NSImage;
 use objc2_core_foundation::CGFloat;
