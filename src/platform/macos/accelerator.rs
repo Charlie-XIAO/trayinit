@@ -4,6 +4,7 @@ use objc2_app_kit::NSEventModifierFlags;
 use crate::menu::{Accelerator, AcceleratorError};
 
 pub fn key_equivalent(accelerator: &Accelerator) -> Result<String, AcceleratorError> {
+    // Reference: muda/src/platform_impl/macos/accelerator.rs:14.
     Ok(match accelerator.key() {
         Code::KeyA => "a".into(),
         Code::KeyB => "b".into(),
@@ -98,6 +99,7 @@ pub fn key_equivalent(accelerator: &Accelerator) -> Result<String, AcceleratorEr
 }
 
 pub fn modifier_mask(accelerator: &Accelerator) -> Result<NSEventModifierFlags, AcceleratorError> {
+    // Reference: muda/src/platform_impl/macos/accelerator.rs:111.
     let mods: Modifiers = accelerator.modifiers();
     let supported = Modifiers::SHIFT | Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER;
     let unsupported = mods & !supported;

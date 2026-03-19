@@ -1,9 +1,3 @@
-//! Native macOS backend implemented directly with `objc2`/AppKit.
-//!
-//! This intentionally follows the same native building blocks as the
-//! battle-tested `tray-icon` and `muda` implementations under
-//! `D:\Projects\probe`, but keeps the implementation in this crate.
-
 mod accelerator;
 mod icon;
 mod util;
@@ -452,6 +446,7 @@ impl NativeTray {
     }
 
     fn create_status_item<Message>(&mut self, view: &NormalizedTrayView<Message>) -> Result<()> {
+        // Reference: tray-icon/src/platform_impl/macos/mod.rs:49.
         let status_item =
             NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
 
@@ -525,6 +520,7 @@ struct NativeMenuTree {
 
 impl NativeMenuTree {
     fn new<Message>(tray_id: &str, items: &[NormalizedMenuItem<Message>]) -> Result<Self> {
+        // Reference: muda/src/platform_impl/macos/mod.rs:81.
         let mtm = MainThreadMarker::new().ok_or(Error::Unsupported(
             "macOS menus must be created on the main thread",
         ))?;
@@ -611,6 +607,7 @@ define_class!(
         #[unsafe(method(updateTrackingAreas))]
         fn update_tracking_areas(&self) {
             unsafe {
+                // Reference: tray-icon/src/platform_impl/macos/mod.rs:428.
                 let areas = self.trackingAreas();
                 for index in 0..areas.count() {
                     let area = areas.objectAtIndex(index);
@@ -703,6 +700,9 @@ impl ActionMenuItem {
         action: Option<Sel>,
         accelerator: Option<&Accelerator>,
     ) -> Result<Retained<Self>> {
+        // Reference:
+        // muda/src/platform_impl/macos/mod.rs:959.
+        // muda/src/platform_impl/macos/mod.rs:1051.
         let title = NSString::from_str(title);
         let key_equivalent = accelerator
             .map(key_equivalent)
@@ -732,6 +732,7 @@ enum MouseButton {
 }
 
 fn show_menu_if_needed(this: &TrayTarget, button: MouseButton) {
+    // Reference: tray-icon/src/platform_impl/macos/mod.rs:471.
     let mtm = MainThreadMarker::from(this);
     unsafe {
         let ns_button = this.ivars().status_item.button(mtm).unwrap();
@@ -759,6 +760,9 @@ fn tray_target_has_menu(this: &TrayTarget) -> bool {
 }
 
 fn dispatch_interaction_from_event(this: &TrayTarget, event: &NSEvent, kind: InteractionKind) {
+    // Reference:
+    // tray-icon/src/platform_impl/macos/mod.rs:494.
+    // tray-icon/src/platform_impl/macos/mod.rs:509.
     let mtm = MainThreadMarker::from(this);
     let tray_id = this.ivars().tray_id.to_string();
 
@@ -902,6 +906,9 @@ fn build_action_menu_item<Message>(
     is_check: bool,
     is_radio: bool,
 ) -> Result<Retained<ActionMenuItem>> {
+    // Reference:
+    // muda/src/platform_impl/macos/mod.rs:453.
+    // muda/src/platform_impl/macos/mod.rs:1051.
     let title = strip_mnemonic(&item.label);
     let action = if item.message.is_some() {
         Some(sel!(fireMenuItemAction:))
@@ -950,6 +957,7 @@ fn build_action_menu_item<Message>(
 }
 
 fn set_menu_item_icon(menu_item: &NSMenuItem, icon: Option<&Icon>) -> Result<()> {
+    // Reference: muda/src/platform_impl/macos/mod.rs:1076.
     if let Some(icon) = icon {
         let nsimage = to_nsimage(icon, Some(18.0))?;
         menu_item.setImage(Some(&nsimage));

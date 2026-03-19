@@ -9,6 +9,7 @@ use objc2_foundation::{NSData, NSSize};
 use crate::{Error, Icon};
 
 pub fn to_png(icon: &Icon) -> Result<Vec<u8>, Error> {
+    // Reference: muda/src/platform_impl/macos/icon.rs:25.
     let mut png = Vec::new();
 
     {
@@ -29,6 +30,9 @@ pub fn to_png(icon: &Icon) -> Result<Vec<u8>, Error> {
 }
 
 pub fn to_nsimage(icon: &Icon, fixed_height: Option<f64>) -> Result<Retained<NSImage>, Error> {
+    // Reference:
+    // tray-icon/src/platform_impl/macos/mod.rs:266.
+    // muda/src/platform_impl/macos/icon.rs:41.
     let png = to_png(icon)?;
 
     let (icon_width, icon_height) = match fixed_height {
@@ -41,7 +45,7 @@ pub fn to_nsimage(icon: &Icon, fixed_height: Option<f64>) -> Result<Retained<NSI
         None => (icon.width() as CGFloat, icon.height() as CGFloat),
     };
 
-    let nsdata = NSData::with_bytes(&png);
+    let nsdata = NSData::from_vec(png);
     let nsimage = NSImage::initWithData(NSImage::alloc(), &nsdata)
         .ok_or_else(|| Error::Backend("failed to construct NSImage from tray icon data".into()))?;
     nsimage.setSize(NSSize::new(icon_width, icon_height));
