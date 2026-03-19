@@ -1,22 +1,11 @@
-#[cfg(not(target_os = "macos"))]
 use std::io::Cursor;
-#[cfg(not(target_os = "macos"))]
 use std::sync::Arc;
-#[cfg(not(target_os = "macos"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(not(target_os = "macos"))]
-use std::thread;
-#[cfg(not(target_os = "macos"))]
-use std::time::Duration;
 
-#[cfg(not(target_os = "macos"))]
 use png::{ColorType, Decoder, Transformations};
-#[cfg(not(target_os = "macos"))]
 use trayinit::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
-#[cfg(not(target_os = "macos"))]
 use trayinit::{Icon, Tray, TrayEvent, TrayMethods, TrayStatus};
 
-#[cfg(not(target_os = "macos"))]
 #[derive(Debug, Copy, Clone)]
 enum Message {
     TrayWarm,
@@ -28,7 +17,6 @@ enum Message {
     Quit,
 }
 
-#[cfg(not(target_os = "macos"))]
 #[derive(Debug, Copy, Clone)]
 enum TrayIconKind {
     Warm,
@@ -37,7 +25,6 @@ enum TrayIconKind {
     Named,
 }
 
-#[cfg(not(target_os = "macos"))]
 struct IconsTray {
     tray_icon: TrayIconKind,
     show_overlay: bool,
@@ -45,7 +32,6 @@ struct IconsTray {
     keep_running: Arc<AtomicBool>,
 }
 
-#[cfg(not(target_os = "macos"))]
 impl Tray for IconsTray {
     type Message = Message;
 
@@ -203,55 +189,35 @@ impl Tray for IconsTray {
             _ => {},
         }
     }
+
+    fn should_exit(&self) -> bool {
+        !self.keep_running.load(Ordering::Relaxed)
+    }
 }
 
-#[cfg(target_os = "macos")]
-fn main() {
-    tracing_subscriber::fmt::init();
-    eprintln!("This example uses spawn(), which is not implemented on macOS yet.");
-    eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
-}
-
-#[cfg(not(target_os = "macos"))]
 fn main() {
     tracing_subscriber::fmt::init();
 
-    let keep_running = Arc::new(AtomicBool::new(true));
     let tray = IconsTray {
         tray_icon: TrayIconKind::Asset,
         show_overlay: false,
         needs_attention: false,
-        keep_running: Arc::clone(&keep_running),
+        keep_running: Arc::new(AtomicBool::new(true)),
     };
-    let handle = tray.spawn().expect("spawn icons tray example");
 
     println!("Running icons tray example.");
-    println!("Startup mode: spawn() self-hosted tray.");
+    println!("Startup mode: run() standalone tray.");
     println!("Features in this example:");
     println!("- embedded PNG tray icon loading via include_bytes!(\"icon.png\")");
     println!("- generated tray icons");
-    println!("- Linux theme icon names for tray and menu when supported by the host");
-    println!("- Linux overlay and attention icon properties");
-    println!(
-        "- attention uses raster icons for raster tray icons, and icon-name only for the themed \
-         tray icon"
-    );
-    println!(
-        "- switching the base tray icon clears attention in this demo, because hosts may present \
-         attention state independently from normal icon replacement"
-    );
     println!("- menu item icons");
     println!("- submenu icon");
     println!("- tray icon switching from menu actions");
+    println!("- Linux-specific theme-name/overlay/attention properties remain host-dependent");
 
-    while keep_running.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(250));
-    }
-
-    handle.shutdown().expect("shutdown icons tray example");
+    tray.run().expect("run icons tray example");
 }
 
-#[cfg(not(target_os = "macos"))]
 fn make_tray_icon(r: u8, g: u8, b: u8) -> Icon {
     let width = 32usize;
     let height = 32usize;
@@ -281,7 +247,6 @@ fn make_tray_icon(r: u8, g: u8, b: u8) -> Icon {
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated tray icon")
 }
 
-#[cfg(not(target_os = "macos"))]
 fn make_menu_icon(r: u8, g: u8, b: u8) -> Icon {
     let width = 16usize;
     let height = 16usize;
@@ -311,7 +276,6 @@ fn make_menu_icon(r: u8, g: u8, b: u8) -> Icon {
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated menu icon")
 }
 
-#[cfg(not(target_os = "macos"))]
 fn make_overlay_icon(r: u8, g: u8, b: u8) -> Icon {
     let width = 12usize;
     let height = 12usize;
@@ -342,7 +306,6 @@ fn make_overlay_icon(r: u8, g: u8, b: u8) -> Icon {
     Icon::from_rgba(rgba, width as u32, height as u32).expect("valid generated overlay icon")
 }
 
-#[cfg(not(target_os = "macos"))]
 fn asset_icon() -> Icon {
     let png_bytes = include_bytes!("icon.png");
     let mut decoder = Decoder::new(Cursor::new(png_bytes));
@@ -366,7 +329,6 @@ fn asset_icon() -> Icon {
     Icon::from_rgba(rgba, info.width, info.height).expect("valid icon from example icon.png")
 }
 
-#[cfg(not(target_os = "macos"))]
 fn rgb_to_rgba(rgb: &[u8]) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
     for chunk in rgb.chunks_exact(3) {
@@ -375,7 +337,6 @@ fn rgb_to_rgba(rgb: &[u8]) -> Vec<u8> {
     rgba
 }
 
-#[cfg(not(target_os = "macos"))]
 fn grayscale_alpha_to_rgba(data: &[u8]) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(data.len() / 2 * 4);
     for chunk in data.chunks_exact(2) {
@@ -384,7 +345,6 @@ fn grayscale_alpha_to_rgba(data: &[u8]) -> Vec<u8> {
     rgba
 }
 
-#[cfg(not(target_os = "macos"))]
 fn grayscale_to_rgba(data: &[u8]) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(data.len() * 4);
     for &value in data {

@@ -11,13 +11,14 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{AnyThread, DeclaredClass, MainThreadOnly, Message, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
-    NSEventModifierFlags, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSTrackingArea,
-    NSTrackingAreaOptions, NSVariableStatusItemLength, NSView, NSWindow,
+    NSApplication, NSApplicationActivationPolicy, NSCellImagePosition, NSControlStateValueOff,
+    NSControlStateValueOn, NSEvent, NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem,
+    NSStatusBar, NSStatusItem, NSTrackingArea, NSTrackingAreaOptions, NSVariableStatusItemLength,
+    NSView, NSWindow,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGDisplayPixelsHigh, CGMainDisplayID};
-use objc2_foundation::{MainThreadMarker, NSObject, NSString};
+use objc2_foundation::{MainThreadMarker, NSObject, NSPoint, NSString};
 
 use self::accelerator::{key_equivalent, modifier_mask};
 use self::icon::to_nsimage;
@@ -135,7 +136,7 @@ where
         linux: _,
     } = builder;
 
-    let shared = Shared::new(tray)?;
+    let shared = Shared::new(tray, false)?;
     let tray_id = shared.state.borrow().tray_id.clone();
     shared.clone().register();
     shared.maybe_shutdown();
@@ -147,10 +148,38 @@ pub fn run<T: Tray>(builder: Builder<T>) -> Result<()>
 where
     T::Message: Clone,
 {
-    let _ = builder;
-    Err(Error::Unsupported(
-        "macOS run() is not implemented yet; use attach() from an existing AppKit event loop",
-    ))
+    if matches!(
+        builder.runtime_preference_ref(),
+        RuntimePreference::DedicatedThread
+    ) {
+        return Err(Error::Unsupported(
+            "macOS run() requires the main thread; dedicated-thread run() is unsupported",
+        ));
+    }
+
+    let Builder {
+        tray,
+        runtime_preference: _,
+        linux: _,
+    } = builder;
+
+    let mtm = MainThreadMarker::new().ok_or(Error::Unsupported(
+        "macOS tray runtime must run on the main thread",
+    ))?;
+    let app = NSApplication::sharedApplication(mtm);
+    let _ = app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    app.finishLaunching();
+
+    let shared = Shared::new(tray, true)?;
+    shared.clone().register();
+    shared.maybe_shutdown();
+    if shared.closed.get() {
+        return Ok(());
+    }
+
+    app.run();
+    shared.shutdown();
+    Ok(())
 }
 
 trait RuntimeOps {
@@ -186,6 +215,7 @@ fn dispatch_menu_tracking(tray_id: &str, open: bool) {
 
 struct Shared<T: Tray> {
     closed: Cell<bool>,
+    owns_app_loop: bool,
     menu_tracking: Cell<bool>,
     pending_render: Cell<bool>,
     state: RefCell<State<T>>,
@@ -239,6 +269,10 @@ impl<T: Tray> Shared<T> {
         REGISTRY.with(|registry| {
             registry.borrow_mut().trays.remove(&tray_id);
         });
+
+        if self.owns_app_loop {
+            stop_app_loop();
+        }
     }
 }
 
@@ -246,7 +280,7 @@ impl<T: Tray> Shared<T>
 where
     T::Message: Clone,
 {
-    fn new(tray: T) -> Result<Rc<Self>> {
+    fn new(tray: T, owns_app_loop: bool) -> Result<Rc<Self>> {
         MainThreadMarker::new().ok_or(Error::Unsupported(
             "macOS tray objects must be created and updated on the main thread",
         ))?;
@@ -265,6 +299,7 @@ where
 
         Ok(Rc::new(Self {
             closed: Cell::new(false),
+            owns_app_loop,
             menu_tracking: Cell::new(false),
             pending_render: Cell::new(false),
             state: RefCell::new(State {
@@ -808,6 +843,29 @@ fn tray_rect(window: &NSWindow) -> (dpi::PhysicalPosition<i32>, dpi::PhysicalSiz
 
 fn flip_window_screen_coordinates(y: f64) -> f64 {
     CGDisplayPixelsHigh(CGMainDisplayID()) as f64 - y
+}
+
+fn stop_app_loop() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+
+    let app = NSApplication::sharedApplication(mtm);
+    app.stop(None);
+
+    if let Some(event) = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+        NSEventType::ApplicationDefined,
+        NSPoint::new(0.0, 0.0),
+        NSEventModifierFlags::empty(),
+        0.0,
+        0,
+        None,
+        0,
+        0,
+        0,
+    ) {
+        app.postEvent_atStart(&event, true);
+    }
 }
 
 fn set_status_item_icon(

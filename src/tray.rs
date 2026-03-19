@@ -164,8 +164,8 @@ pub trait Tray: Sized + Send + 'static {
     /// - Linux SNI/DBus: exported through `org.kde.StatusNotifierItem.Menu`,
     ///   which points to the `com.canonical.dbusmenu` object path served by the
     ///   backend.
-    /// - macOS: converted to a native `NSMenu` through `tray-icon`'s re-export
-    ///   of `muda`.
+    /// - macOS: converted to a native `NSMenu`, following the native AppKit
+    ///   menu construction path used by `muda`.
     fn menu(&self) -> Vec<MenuItem<Self::Message>> {
         Vec::new()
     }
@@ -202,9 +202,8 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///   flow", not "callbacks run on the caller thread". If
     ///   `Builder::linux_tokio_handle(...)` is set, the backend reuses that
     ///   Tokio runtime instead of creating its own private runtime.
-    /// - macOS: this is currently the only supported startup mode. It must be
-    ///   called on the main thread after the host AppKit event loop is running,
-    ///   matching `tray-icon`'s documented macOS constraints.
+    /// - macOS: supported on the main thread for host-integrated AppKit
+    ///   applications, such as `winit`.
     fn attach(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -221,9 +220,8 @@ pub trait TrayMethods: Tray + private::Sealed {
     /// - Linux: currently uses a dedicated backend thread for the SNI/DBus
     ///   service. If `Builder::linux_tokio_handle(...)` is set, the backend
     ///   reuses that Tokio runtime instead of creating its own private runtime.
-    /// - macOS: currently unsupported. The backend uses `NSStatusItem` through
-    ///   `tray-icon`, which requires creation on the main thread with an
-    ///   already-running AppKit event loop.
+    /// - macOS: unsupported. AppKit tray work must stay on the main thread, so
+    ///   a detached helper-thread tray runtime is not a valid backend shape.
     fn spawn(self) -> Result<Handle<Self>>
     where
         Self::Message: Clone,
@@ -242,8 +240,8 @@ pub trait TrayMethods: Tray + private::Sealed {
     ///   If `Builder::linux_tokio_handle(...)` is set, the backend still uses
     ///   the helper thread, but reuses that Tokio runtime instead of creating a
     ///   private one.
-    /// - macOS: currently unsupported. Use [`TrayMethods::attach`] from an
-    ///   existing AppKit-driven application loop instead.
+    /// - macOS: supported on the main thread. `run()` owns the AppKit event
+    ///   loop for standalone tray applications.
     fn run(self) -> Result<()>
     where
         Self::Message: Clone,
