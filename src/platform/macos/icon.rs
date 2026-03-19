@@ -44,9 +44,7 @@ pub fn to_nsimage(icon: &Icon, fixed_height: Option<f64>) -> Result<Retained<NSI
     let nsdata = NSData::with_bytes(&png);
     let nsimage = NSImage::initWithData(NSImage::alloc(), &nsdata)
         .ok_or_else(|| Error::Backend("failed to construct NSImage from tray icon data".into()))?;
-    unsafe {
-        nsimage.setSize(NSSize::new(icon_width, icon_height));
-    }
+    nsimage.setSize(NSSize::new(icon_width, icon_height));
 
     Ok(nsimage)
 }

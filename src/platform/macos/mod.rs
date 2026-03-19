@@ -289,11 +289,6 @@ where
             return Ok(());
         }
 
-        if self.menu_tracking.get() {
-            self.pending_render.set(true);
-            return Ok(());
-        }
-
         let mut state = self.state.borrow_mut();
         let view = NormalizedTrayView::from_tray(&state.tray);
 
@@ -308,7 +303,19 @@ where
             None
         };
 
-        state.native.apply_view(&view, menu_changed, menu_tree)?;
+        let defer_menu_update = self.menu_tracking.get() && menu_changed;
+        if defer_menu_update {
+            self.pending_render.set(true);
+        }
+
+        state
+            .native
+            .apply_view(&view, menu_changed && !defer_menu_update, menu_tree)?;
+
+        if defer_menu_update {
+            return Ok(());
+        }
+
         state.menu_messages = collect_menu_messages(&state.tray_id, &view.menu);
         state.menu_model = view.menu;
         state.has_menu = !state.menu_model.is_empty();
@@ -445,9 +452,8 @@ impl NativeTray {
     }
 
     fn create_status_item<Message>(&mut self, view: &NormalizedTrayView<Message>) -> Result<()> {
-        let status_item = unsafe {
-            NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength)
-        };
+        let status_item =
+            NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
 
         set_status_item_icon(&status_item, view.icon.as_ref(), self.mtm)?;
         set_status_item_title(&status_item, view.title.as_deref(), self.mtm);
@@ -496,10 +502,8 @@ impl NativeTray {
 
     fn remove(&mut self) {
         if let (Some(status_item), Some(tray_target)) = (&self.status_item, &self.tray_target) {
-            unsafe {
-                NSStatusBar::systemStatusBar().removeStatusItem(status_item);
-                tray_target.removeFromSuperview();
-            }
+            NSStatusBar::systemStatusBar().removeStatusItem(status_item);
+            tray_target.removeFromSuperview();
         }
 
         self.status_item = None;
@@ -525,9 +529,7 @@ impl NativeMenuTree {
             "macOS menus must be created on the main thread",
         ))?;
         let root = NSMenu::new(mtm);
-        unsafe {
-            root.setAutoenablesItems(false);
-        }
+        root.setAutoenablesItems(false);
         let delegate = MenuDelegate::new(mtm, tray_id);
         unsafe {
             let () = msg_send![&*root, setDelegate: &*delegate];
@@ -578,10 +580,8 @@ define_class!(
         #[unsafe(method(mouseUp:))]
         fn mouse_up(&self, event: &NSEvent) {
             let mtm = MainThreadMarker::from(self);
-            unsafe {
-                let button = self.ivars().status_item.button(mtm).unwrap();
-                button.highlight(false);
-            }
+            let button = self.ivars().status_item.button(mtm).unwrap();
+            button.highlight(false);
 
             let has_menu = tray_target_has_menu(self);
             if !(self.ivars().menu_on_left_click.get() && has_menu) {
@@ -603,7 +603,7 @@ define_class!(
 
         #[unsafe(method(otherMouseUp:))]
         fn other_mouse_up(&self, event: &NSEvent) {
-            if unsafe { event.buttonNumber() } == 2 {
+            if event.buttonNumber() == 2 {
                 dispatch_interaction_from_event(self, event, InteractionKind::SecondaryActivate);
             }
         }
@@ -646,10 +646,8 @@ define_class!(
 impl TrayTarget {
     fn update_dimensions(&self) {
         let mtm = MainThreadMarker::from(self);
-        unsafe {
-            let button = self.ivars().status_item.button(mtm).unwrap();
-            self.setFrame(button.frame());
-        }
+        let button = self.ivars().status_item.button(mtm).unwrap();
+        self.setFrame(button.frame());
     }
 }
 
@@ -764,29 +762,27 @@ fn dispatch_interaction_from_event(this: &TrayTarget, event: &NSEvent, kind: Int
     let mtm = MainThreadMarker::from(this);
     let tray_id = this.ivars().tray_id.to_string();
 
-    unsafe {
-        let window = event.window(mtm).unwrap();
-        let icon_rect = tray_rect(&window);
-        let mouse_location = NSEvent::mouseLocation();
-        let scale_factor = window.backingScaleFactor();
-        let cursor_position: dpi::PhysicalPosition<f64> = dpi::LogicalPosition::new(
-            mouse_location.x,
-            flip_window_screen_coordinates(mouse_location.y),
-        )
-        .to_physical(scale_factor);
+    let window = event.window(mtm).unwrap();
+    let icon_rect = tray_rect(&window);
+    let mouse_location = NSEvent::mouseLocation();
+    let scale_factor = window.backingScaleFactor();
+    let cursor_position: dpi::PhysicalPosition<f64> = dpi::LogicalPosition::new(
+        mouse_location.x,
+        flip_window_screen_coordinates(mouse_location.y),
+    )
+    .to_physical(scale_factor);
 
-        dispatch_interaction(
-            &tray_id,
-            InteractionEvent {
-                kind,
-                position: Some(dpi::PhysicalPosition::new(
-                    cursor_position.x.round() as i32,
-                    cursor_position.y.round() as i32,
-                )),
-                area: Some(icon_rect),
-            },
-        );
-    }
+    dispatch_interaction(
+        &tray_id,
+        InteractionEvent {
+            kind,
+            position: Some(dpi::PhysicalPosition::new(
+                cursor_position.x.round() as i32,
+                cursor_position.y.round() as i32,
+            )),
+            area: Some(icon_rect),
+        },
+    );
 }
 
 fn tray_rect(window: &NSWindow) -> (dpi::PhysicalPosition<i32>, dpi::PhysicalSize<i32>) {
@@ -807,7 +803,7 @@ fn tray_rect(window: &NSWindow) -> (dpi::PhysicalPosition<i32>, dpi::PhysicalSiz
 }
 
 fn flip_window_screen_coordinates(y: f64) -> f64 {
-    unsafe { CGDisplayPixelsHigh(CGMainDisplayID()) as f64 - y }
+    CGDisplayPixelsHigh(CGMainDisplayID()) as f64 - y
 }
 
 fn set_status_item_icon(
@@ -815,29 +811,23 @@ fn set_status_item_icon(
     icon: Option<&Icon>,
     mtm: MainThreadMarker,
 ) -> Result<()> {
-    let button = unsafe { status_item.button(mtm).unwrap() };
+    let button = status_item.button(mtm).unwrap();
 
     if let Some(icon) = icon {
         let nsimage = to_nsimage(icon, Some(18.0))?;
-        unsafe {
-            button.setImage(Some(&nsimage));
-            button.setImagePosition(NSCellImagePosition::ImageLeft);
-        }
+        button.setImage(Some(&nsimage));
+        button.setImagePosition(NSCellImagePosition::ImageLeft);
     } else {
-        unsafe {
-            button.setImage(None);
-        }
+        button.setImage(None);
     }
 
     Ok(())
 }
 
 fn set_status_item_title(status_item: &NSStatusItem, title: Option<&str>, mtm: MainThreadMarker) {
-    unsafe {
-        if let Some(button) = status_item.button(mtm) {
-            let title = NSString::from_str(title.unwrap_or_default());
-            button.setTitle(&title);
-        }
+    if let Some(button) = status_item.button(mtm) {
+        let title = NSString::from_str(title.unwrap_or_default());
+        button.setTitle(&title);
     }
 }
 
@@ -846,11 +836,9 @@ fn set_status_item_tooltip(
     tooltip: Option<&str>,
     mtm: MainThreadMarker,
 ) {
-    unsafe {
-        if let Some(button) = status_item.button(mtm) {
-            let tooltip = tooltip.map(NSString::from_str);
-            button.setToolTip(tooltip.as_deref());
-        }
+    if let Some(button) = status_item.button(mtm) {
+        let tooltip = tooltip.map(NSString::from_str);
+        button.setToolTip(tooltip.as_deref());
     }
 }
 
@@ -880,9 +868,7 @@ fn append_menu_item<Message>(
         },
         NormalizedMenuItem::Submenu(submenu) => {
             let submenu_menu = NSMenu::new(mtm);
-            unsafe {
-                submenu_menu.setAutoenablesItems(false);
-            }
+            submenu_menu.setAutoenablesItems(false);
 
             for (index, child) in submenu.children.iter().enumerate() {
                 path.push(index);
@@ -892,10 +878,8 @@ fn append_menu_item<Message>(
 
             let title = strip_mnemonic(&submenu.label);
             let menu_item = ActionMenuItem::new(mtm, &title, None, None)?;
-            unsafe {
-                menu_item.setEnabled(submenu.enabled);
-                menu_item.setSubmenu(Some(&submenu_menu));
-            }
+            menu_item.setEnabled(submenu.enabled);
+            menu_item.setSubmenu(Some(&submenu_menu));
             if let Some(icon) = submenu.icon.as_ref() {
                 set_menu_item_icon(&menu_item, Some(icon))?;
             }
@@ -968,13 +952,9 @@ fn build_action_menu_item<Message>(
 fn set_menu_item_icon(menu_item: &NSMenuItem, icon: Option<&Icon>) -> Result<()> {
     if let Some(icon) = icon {
         let nsimage = to_nsimage(icon, Some(18.0))?;
-        unsafe {
-            menu_item.setImage(Some(&nsimage));
-        }
+        menu_item.setImage(Some(&nsimage));
     } else {
-        unsafe {
-            menu_item.setImage(None);
-        }
+        menu_item.setImage(None);
     }
     Ok(())
 }

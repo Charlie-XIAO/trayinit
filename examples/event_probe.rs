@@ -1,9 +1,13 @@
+#[cfg(not(target_os = "macos"))]
 use std::io;
 
+#[cfg(not(target_os = "macos"))]
 use trayinit::{Icon, InteractionEvent, ScrollEvent, Tray, TrayEvent, TrayMethods};
 
+#[cfg(not(target_os = "macos"))]
 struct EventProbeTray;
 
+#[cfg(not(target_os = "macos"))]
 impl Tray for EventProbeTray {
     type Message = Never;
 
@@ -33,18 +37,20 @@ impl Tray for EventProbeTray {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Clone, Debug)]
 enum Never {}
 
+#[cfg(target_os = "macos")]
 fn main() {
     tracing_subscriber::fmt::init();
+    eprintln!("This example uses spawn(), which is not implemented on macOS yet.");
+    eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
+}
 
-    #[cfg(target_os = "macos")]
-    {
-        eprintln!("This example uses spawn(), which is not implemented on macOS yet.");
-        eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
-        return;
-    }
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    tracing_subscriber::fmt::init();
 
     let tray = EventProbeTray;
     let handle = tray.spawn().expect("spawn event probe example");
@@ -70,6 +76,7 @@ fn main() {
     handle.shutdown().expect("shutdown event probe example");
 }
 
+#[cfg(not(target_os = "macos"))]
 fn log_interaction(interaction: InteractionEvent) {
     println!(
         "interaction: kind={:?} position={:?} area={:?}",
@@ -77,6 +84,7 @@ fn log_interaction(interaction: InteractionEvent) {
     );
 }
 
+#[cfg(not(target_os = "macos"))]
 fn log_scroll(scroll: ScrollEvent) {
     println!(
         "scroll: delta={} axis={:?} position={:?} area={:?}",
@@ -84,6 +92,7 @@ fn log_scroll(scroll: ScrollEvent) {
     );
 }
 
+#[cfg(not(target_os = "macos"))]
 fn make_icon() -> Icon {
     let width = 32usize;
     let height = 32usize;

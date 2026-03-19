@@ -1,11 +1,18 @@
+#[cfg(not(target_os = "macos"))]
 use std::sync::Arc;
+#[cfg(not(target_os = "macos"))]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(target_os = "macos"))]
 use std::thread;
+#[cfg(not(target_os = "macos"))]
 use std::time::Duration;
 
+#[cfg(not(target_os = "macos"))]
 use trayinit::menu::{CheckItem, MenuItem, RadioGroup, RadioItem, StandardItem, Submenu};
+#[cfg(not(target_os = "macos"))]
 use trayinit::{Icon, Tray, TrayEvent, TrayMethods};
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Debug, Copy, Clone)]
 enum Message {
     ToggleTicks,
@@ -17,6 +24,7 @@ enum Message {
     Quit,
 }
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Debug, Copy, Clone)]
 enum Accent {
     Red,
@@ -24,6 +32,7 @@ enum Accent {
     Blue,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl Accent {
     fn rgb(&self) -> (u8, u8, u8) {
         match self {
@@ -42,6 +51,7 @@ impl Accent {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 struct ShowcaseTray {
     ticks_enabled: bool,
     menu_on_primary_click: bool,
@@ -50,6 +60,7 @@ struct ShowcaseTray {
     keep_running: Arc<AtomicBool>,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl Tray for ShowcaseTray {
     type Message = Message;
 
@@ -140,15 +151,16 @@ impl Tray for ShowcaseTray {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn main() {
     tracing_subscriber::fmt::init();
+    eprintln!("This example uses spawn(), which is not implemented on macOS yet.");
+    eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
+}
 
-    #[cfg(target_os = "macos")]
-    {
-        eprintln!("This example uses spawn(), which is not implemented on macOS yet.");
-        eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
-        return;
-    }
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    tracing_subscriber::fmt::init();
 
     let keep_running = Arc::new(AtomicBool::new(true));
     let tray = ShowcaseTray {
@@ -189,10 +201,12 @@ fn main() {
     handle.shutdown().expect("shutdown showcase tray example");
 }
 
+#[cfg(not(target_os = "macos"))]
 fn on_off(value: bool) -> &'static str {
     if value { "on" } else { "off" }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn make_icon(accent: Accent, active: bool) -> Icon {
     let (r, g, b) = accent.rgb();
     let width = 32usize;

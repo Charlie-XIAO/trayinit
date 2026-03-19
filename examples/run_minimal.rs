@@ -1,17 +1,22 @@
+#[cfg(not(target_os = "macos"))]
 use trayinit::menu::{CheckItem, MenuItem, StandardItem};
+#[cfg(not(target_os = "macos"))]
 use trayinit::{Tray, TrayEvent, TrayMethods};
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Debug, Copy, Clone)]
 enum Message {
     Toggle,
     Quit,
 }
 
+#[cfg(not(target_os = "macos"))]
 struct RunMinimalTray {
     enabled: bool,
     quit_requested: bool,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl Tray for RunMinimalTray {
     type Message = Message;
 
@@ -49,15 +54,16 @@ impl Tray for RunMinimalTray {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn main() {
     tracing_subscriber::fmt::init();
+    eprintln!("This example uses run(), which is not implemented on macOS yet.");
+    eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
+}
 
-    #[cfg(target_os = "macos")]
-    {
-        eprintln!("This example uses run(), which is not implemented on macOS yet.");
-        eprintln!("Use the attach()-based examples like winit_window or winit_no_window instead.");
-        return;
-    }
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    tracing_subscriber::fmt::init();
 
     let tray = RunMinimalTray {
         enabled: false,
