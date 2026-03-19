@@ -198,7 +198,8 @@ thread_local! {
 }
 
 fn with_runtime<R>(tray_id: &str, f: impl FnOnce(&Rc<dyn RuntimeOps>) -> R) -> Option<R> {
-    REGISTRY.with(|registry| registry.borrow().trays.get(tray_id).map(f))
+    let runtime = REGISTRY.with(|registry| registry.borrow().trays.get(tray_id).cloned());
+    runtime.as_ref().map(f)
 }
 
 fn dispatch_menu_action(tray_id: &str, menu_id: &str) {
