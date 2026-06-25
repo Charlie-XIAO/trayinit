@@ -65,7 +65,7 @@ impl fmt::Display for IconError {
             Self::DimensionsOverflow => write!(f, "icon dimensions overflow supported size"),
             Self::InvalidRgbaLength { expected, actual } => {
                 write!(f, "icon RGBA data has length {actual}, expected {expected}")
-            }
+            },
         }
     }
 }

@@ -4,6 +4,7 @@ mod event;
 mod icon;
 mod menu;
 mod model;
+mod platform;
 mod tray;
 
 pub use error::{InvalidState, TrayError, TrayResult};

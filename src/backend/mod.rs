@@ -1,17 +1,11 @@
 pub(crate) mod plan;
 
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex, mpsc::Sender},
-    thread::JoinHandle,
-};
+use std::collections::HashSet;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
-use crate::{
-    EventSink, InvalidState, Menu, MenuItemId, MenuNode, TrayError, TrayResult, TrayState,
-};
-
-#[cfg(windows)]
-mod windows;
+use crate::{InvalidState, Menu, MenuItemId, MenuNode, TrayError, TrayResult, TrayState};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BackendCommand {
@@ -79,22 +73,6 @@ impl BackendProxy {
     }
 }
 
-pub(crate) fn spawn_backend(
-    initial_state: TrayState,
-    sink: Arc<dyn EventSink>,
-) -> TrayResult<BackendProxy> {
-    #[cfg(windows)]
-    {
-        windows::spawn(initial_state, sink)
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = (initial_state, sink);
-        Err(TrayError::UnsupportedPlatform)
-    }
-}
-
 pub(crate) fn validate_state(state: &TrayState) -> TrayResult<()> {
     if let Some(icon) = &state.icon {
         crate::icon::validate_rgba(icon.rgba(), icon.width(), icon.height())
@@ -123,8 +101,8 @@ fn validate_nodes(nodes: &[MenuNode], seen: &mut HashSet<MenuItemId>) -> TrayRes
                     validate_id(id, seen)?;
                 }
                 validate_nodes(&submenu.children, seen)?;
-            }
-            MenuNode::Separator => {}
+            },
+            MenuNode::Separator => {},
         }
     }
     Ok(())

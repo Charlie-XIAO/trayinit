@@ -264,6 +264,12 @@ Windows:
 - HWND and native menu handles are thread-affine.
 - The backend should own a private backend thread with a hidden HWND and message
   loop for the core crate.
+- Multiple `Tray` instances are supported: each instance owns its own backend
+  thread, hidden HWND, tray icon, menu, and event sink. Reusing
+  `NOTIFYICONDATAW.uID = 1` is safe because Windows identifies tray icons by the
+  `(HWND, uID)` pair. Repeated window-class registration is safe when
+  `ERROR_CLASS_ALREADY_EXISTS` is accepted, and each HWND receives
+  `TaskbarCreated` independently.
 - `Tray::new` should spawn that thread, wait until the hidden HWND is ready, and
   then return.
 - `TrayHandle` calls from other threads should enqueue commands and wake the
@@ -288,8 +294,14 @@ Linux:
 
 - SNI and DBusMenu are async DBus services.
 - The backend does not need to share a winit event loop.
-- A backend-managed async runtime/task is acceptable.
+- A backend-managed async runtime/task is acceptable. Stage 2 uses zbus on a
+  backend-owned current-thread Tokio runtime as a Linux-only implementation
+  detail; no async runtime leaks into the public API.
 - The crate should not require GTK or a GLib main loop.
+- Multiple `Tray` instances are supported by giving each instance its own zbus
+  connection and generated `org.kde.StatusNotifierItem-{pid}-{counter}` service
+  name. The standard `/StatusNotifierItem` and `/MenuBar` object paths can be
+  reused because the service name differs per tray.
 
 ## Public API Proposal
 
@@ -559,21 +571,28 @@ src/
   icon.rs
   event.rs
   error.rs
-  validation.rs
   backend/
-    mod.rs
-    command.rs
-    diff.rs
-    windows.rs
-    macos.rs
-    linux.rs
+    mod.rs        // shared backend command/proxy/validation boundary
+    plan.rs       // platform-neutral menu planning
+  platform/
+    mod.rs       // platform dispatch and unsupported-platform fallback
+    windows/
+      mod.rs      // Win32 hidden-HWND/Shell_NotifyIcon backend
+    linux/
+      mod.rs      // Linux backend module gate
+      service.rs  // zbus SNI/DBusMenu service runtime
+      menu.rs     // pure DBusMenu planning/property mapping
+    macos/
+      mod.rs      // future AppKit backend
   integration/
     mod.rs
     winit.rs
 ```
 
-The backend modules should be private except for carefully chosen platform
-extension APIs.
+The platform modules should be private implementation details except for
+carefully chosen platform extension APIs. Shared validation, command semantics,
+and platform-neutral planning stay outside `platform/` because they define the
+portable backend contract.
 
 ### Backend boundary
 
@@ -945,7 +964,7 @@ Goals:
 - Implement the pure model layer first: `TrayState::new`, `Menu`, actionable
   `MenuItemId`, optional submenu IDs, `Icon`, `TrayEvent`, and `EventSink`.
 - Implement validation before native code: duplicate actionable IDs, invalid
-  icon dimensions/byte length, required tray ID, and basic state consistency.
+  icon dimensions/byte length, and basic state consistency.
 - Implement menu flattening/planning before native code, including backend
   generated submenu IDs.
 - Add model/command tests before native code:
@@ -965,7 +984,8 @@ Goals:
 - Build native popup menus from the declarative menu state.
 - Deliver menu item activation events through `EventSink` without holding
   backend locks.
-- Provide a minimal Windows example.
+- Provide a minimal cross-platform smoke example with platform cfg only where
+  behavior differs.
 
 Non-goals:
 
@@ -980,11 +1000,15 @@ Goals:
 
 - Implement GTK-free SNI/DBusMenu backend.
 - Use `zbus`; avoid GTK, AppIndicator, and XEmbed.
-- Export SNI and DBusMenu objects.
-- Register with StatusNotifierWatcher.
-- Implement watcher offline/online handling.
-- Implement menu layout flattening, revision tracking, layout updates, and item
-  property updates.
+- Export SNI and DBusMenu objects on per-instance zbus connections.
+- Register with StatusNotifierWatcher using generated service names.
+- Implement soft-start watcher handling:
+  - no watcher at startup: `Tray::new` succeeds and emits
+    `TrayStatus::TemporarilyUnavailable`
+  - watcher registration/recovery succeeds: emit `TrayStatus::Available`
+  - watcher loss: emit `TrayStatus::TemporarilyUnavailable`
+  - session bus/runtime setup failure: `Tray::new` returns an error
+- Implement menu layout flattening, revision tracking, and `LayoutUpdated`.
 - Deliver menu events through `EventSink`.
 - Document desktop environment limitations.
 

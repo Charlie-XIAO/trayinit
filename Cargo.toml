@@ -3,9 +3,14 @@ name = "trayinit"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+linux-zbus-tokio = []
+linux-zbus-async-io = []
+
 [dependencies]
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
@@ -13,3 +18,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures-util = "0.3"
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "sync", "time"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }

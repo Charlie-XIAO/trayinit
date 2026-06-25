@@ -1,42 +1,33 @@
-use std::{
-    collections::HashMap,
-    ptr::{null, null_mut},
-    sync::{
-        Arc,
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
+use std::collections::HashMap;
+use std::ptr::{null, null_mut};
+use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
+
+use windows_sys::Win32::Foundation::{
+    ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM,
+};
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Shell::{
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    Shell_NotifyIconW,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    AppendMenuW, CS_HREDRAW, CS_VREDRAW, ChangeWindowMessageFilterEx, CreatePopupMenu,
+    CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
+    GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HICON, MF_CHECKED, MF_ENABLED,
+    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MSGFLT_ALLOW, PostMessageW,
+    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+    SetWindowLongPtrW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+    TranslateMessage, WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
 };
 
-use windows_sys::Win32::{
-    Foundation::{ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM},
-    System::LibraryLoader::GetModuleHandleW,
-    UI::{
-        Shell::{
-            NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-            Shell_NotifyIconW,
-        },
-        WindowsAndMessaging::{
-            AppendMenuW, CS_HREDRAW, CS_VREDRAW, ChangeWindowMessageFilterEx, CreatePopupMenu,
-            CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow,
-            DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HICON,
-            MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
-            MSG, MSGFLT_ALLOW, PostMessageW, PostQuitMessage, RegisterClassW,
-            RegisterWindowMessageW, SetForegroundWindow, SetWindowLongPtrW, TPM_NONOTIFY,
-            TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_DESTROY,
-            WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW, WS_EX_NOACTIVATE,
-            WS_EX_TOOLWINDOW, WS_OVERLAPPED,
-        },
-    },
-};
-
+use crate::backend::plan::{BackendCommandId, MenuPlan, PlannedNode, PlannedNodeKind, plan_menu};
+use crate::backend::{BackendCommand, BackendProxy};
 use crate::{
     ActivationMode, EventSink, Icon, MenuItemId, TrayError, TrayEvent, TrayIconEventKind,
     TrayResult, TrayState, TrayStatus,
-    backend::{
-        BackendCommand, BackendProxy,
-        plan::{BackendCommandId, MenuPlan, PlannedNode, PlannedNodeKind, plan_menu},
-    },
 };
 
 const TRAY_UID: u32 = 1;
@@ -205,7 +196,7 @@ impl ThreadState {
                 Ok(BackendCommand::SetState(state)) => {
                     self.native.state = state;
                     self.apply_current_state();
-                }
+                },
                 Ok(BackendCommand::Close) => {
                     self.closed = true;
                     self.native.delete_icon(self.hwnd);
@@ -213,7 +204,7 @@ impl ThreadState {
                         DestroyWindow(self.hwnd);
                     }
                     break;
-                }
+                },
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     self.closed = true;
@@ -222,7 +213,7 @@ impl ThreadState {
                         DestroyWindow(self.hwnd);
                     }
                     break;
-                }
+                },
             }
         }
     }
@@ -232,7 +223,7 @@ impl ThreadState {
             let status = match err {
                 ApplyError::TemporarilyUnavailable(message) => {
                     TrayStatus::TemporarilyUnavailable(message)
-                }
+                },
                 ApplyError::Backend(message) => TrayStatus::BackendError(message),
             };
             let event = TrayEvent::StatusChanged { status };
@@ -260,16 +251,17 @@ impl ThreadState {
         let show_menu = match self.native.state.activation_mode {
             ActivationMode::PlatformDefault | ActivationMode::MenuOnSecondaryClick => {
                 kind == TrayIconEventKind::SecondaryClick
-            }
+            },
             ActivationMode::MenuOnPrimaryClick => kind == TrayIconEventKind::PrimaryClick,
         };
 
-        if show_menu && !self.native.hmenu.is_null() {
-            if let Some(item_id) = self.native.track_menu(self.hwnd) {
-                let event = TrayEvent::MenuItemActivated { item_id };
-                self.sink.send(event);
-                return;
-            }
+        if show_menu
+            && !self.native.hmenu.is_null()
+            && let Some(item_id) = self.native.track_menu(self.hwnd)
+        {
+            let event = TrayEvent::MenuItemActivated { item_id };
+            self.sink.send(event);
+            return;
         }
 
         let event = TrayEvent::IconActivated {
@@ -333,9 +325,9 @@ impl NativeTray {
             return Ok(());
         };
 
-        let mut nid = notify_icon_data(hwnd, next_hicon, self.state.tooltip.as_deref());
+        let nid = notify_icon_data(hwnd, next_hicon, self.state.tooltip.as_deref());
         let op = if self.icon_added { NIM_MODIFY } else { NIM_ADD };
-        let ok = unsafe { Shell_NotifyIconW(op, &mut nid) };
+        let ok = unsafe { Shell_NotifyIconW(op, &nid) };
         if ok == 0 {
             let message = shell_notify_error(op);
             unsafe {
@@ -362,9 +354,9 @@ impl NativeTray {
             return;
         }
 
-        let mut nid = notify_icon_data(hwnd, self.hicon, None);
+        let nid = notify_icon_data(hwnd, self.hicon, None);
         unsafe {
-            let _ = Shell_NotifyIconW(NIM_DELETE, &mut nid);
+            let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
         }
         self.icon_added = false;
     }
@@ -515,7 +507,7 @@ fn append_node(
             let label = wide_z(&item.label);
             let flags = MF_STRING | enabled_flag(item.enabled);
             unsafe { AppendMenuW(hmenu, flags, item.command_id as usize, label.as_ptr()) }
-        }
+        },
         PlannedNodeKind::Check(item) => {
             let label = wide_z(&item.label);
             let check = if item.checked {
@@ -525,7 +517,7 @@ fn append_node(
             };
             let flags = MF_STRING | check | enabled_flag(item.enabled);
             unsafe { AppendMenuW(hmenu, flags, item.command_id as usize, label.as_ptr()) }
-        }
+        },
         PlannedNodeKind::Submenu(submenu) => {
             let child_menu = unsafe { CreatePopupMenu() };
             if child_menu.is_null() {
@@ -544,7 +536,7 @@ fn append_node(
             let label = wide_z(&submenu.label);
             let flags = MF_POPUP | enabled_flag(submenu.enabled);
             unsafe { AppendMenuW(hmenu, flags, child_menu as usize, label.as_ptr()) }
-        }
+        },
         PlannedNodeKind::Separator => unsafe { AppendMenuW(hmenu, MF_SEPARATOR, 0, null()) },
     };
 

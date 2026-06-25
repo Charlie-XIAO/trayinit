@@ -1,9 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{
-    EventSink, TrayError, TrayResult, TrayState,
-    backend::{self, BackendCommand, BackendCommandSender, BackendProxy},
-};
+use crate::backend::{self, BackendCommand, BackendCommandSender, BackendProxy};
+use crate::{EventSink, TrayError, TrayResult, TrayState};
 
 pub struct Tray {
     backend: BackendProxy,
@@ -26,7 +24,7 @@ impl Tray {
 
     pub fn new_with_sink(initial_state: TrayState, sink: Arc<dyn EventSink>) -> TrayResult<Self> {
         backend::validate_state(&initial_state)?;
-        let backend = backend::spawn_backend(initial_state.clone(), sink)?;
+        let backend = crate::platform::spawn(initial_state.clone(), sink)?;
         Ok(Self {
             backend,
             last_state: Arc::new(Mutex::new(Some(initial_state))),

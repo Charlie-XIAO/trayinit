@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use crate::{CheckItem, Menu, MenuItem, MenuItemId, MenuNode, Submenu, TrayResult};
-
 use super::validate_menu;
+use crate::{CheckItem, Menu, MenuItem, MenuItemId, MenuNode, Submenu, TrayResult};
 
 pub(crate) type BackendMenuId = u32;
 pub(crate) type BackendCommandId = u32;

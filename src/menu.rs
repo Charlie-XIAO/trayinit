@@ -1,4 +1,5 @@
-use std::{fmt, sync::Arc};
+use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MenuItemId(Arc<str>);
@@ -141,7 +142,7 @@ impl MenuNode {
             Self::Item(item) => item.enabled = false,
             Self::Check(item) => item.enabled = false,
             Self::Submenu(item) => item.enabled = false,
-            Self::Separator => {}
+            Self::Separator => {},
         }
         self
     }

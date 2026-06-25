@@ -1,7 +1,5 @@
-use std::sync::{
-    Arc,
-    mpsc::{self, Receiver, Sender},
-};
+use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 
 use crate::{MenuItemId, PhysicalPosition, PhysicalRect};
 

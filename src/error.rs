@@ -26,7 +26,7 @@ impl fmt::Display for TrayError {
             Self::InvalidState(err) => write!(f, "invalid tray state: {err}"),
             Self::UnsupportedPlatform => {
                 write!(f, "tray backend is not available on this platform")
-            }
+            },
             Self::BackendUnavailable(err) => write!(f, "tray backend is unavailable: {err}"),
             Self::CommandQueueClosed => write!(f, "tray backend command queue is closed"),
             Self::ThreadInit(err) => write!(f, "tray backend thread failed to initialize: {err}"),
