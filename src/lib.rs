@@ -54,6 +54,7 @@ mod tests {
         ));
     }
 
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     #[test]
     fn optional_submenu_id_is_allowed_and_generated_in_plan() {
         let menu = Menu::new([MenuNode::submenu(
@@ -91,6 +92,7 @@ mod tests {
         assert!(backend::validate_state(&state).is_ok());
     }
 
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     #[test]
     fn menu_plan_maps_actionable_items_only() {
         let menu = Menu::new([

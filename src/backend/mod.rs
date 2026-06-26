@@ -1,17 +1,17 @@
-#[cfg(any(target_os = "windows", target_os = "linux", test))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) mod plan;
 
 use std::collections::HashSet;
 #[cfg(target_os = "macos")]
 use std::rc::Rc;
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(not(target_os = "macos"))]
 use std::sync::mpsc::Sender;
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(not(target_os = "macos"))]
 use std::sync::{Arc, Mutex};
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(not(target_os = "macos"))]
 use std::thread::JoinHandle;
 
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(not(target_os = "macos"))]
 use crate::TrayError;
 use crate::{InvalidState, Menu, MenuItemId, MenuNode, TrayResult, TrayState};
 
@@ -28,7 +28,7 @@ pub(crate) struct BackendCommandSender {
 
 #[derive(Clone)]
 enum BackendCommandSenderInner {
-    #[cfg(any(not(target_os = "macos"), test))]
+    #[cfg(not(target_os = "macos"))]
     Channel {
         sender: Sender<BackendCommand>,
         wake: Arc<dyn Fn() + Send + Sync>,
@@ -38,7 +38,7 @@ enum BackendCommandSenderInner {
 }
 
 enum BackendProxyInner {
-    #[cfg(any(not(target_os = "macos"), test))]
+    #[cfg(not(target_os = "macos"))]
     Threaded {
         sender: BackendCommandSender,
         join: Mutex<Option<JoinHandle<()>>>,
@@ -54,7 +54,7 @@ pub(crate) struct BackendProxy {
 impl BackendCommandSender {
     pub(crate) fn send(&self, command: BackendCommand) -> TrayResult<()> {
         match &self.inner {
-            #[cfg(any(not(target_os = "macos"), test))]
+            #[cfg(not(target_os = "macos"))]
             BackendCommandSenderInner::Channel { sender, wake } => {
                 sender
                     .send(command)
@@ -67,7 +67,7 @@ impl BackendCommandSender {
         }
     }
 
-    #[cfg(any(not(target_os = "macos"), test))]
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn channel(
         sender: Sender<BackendCommand>,
         wake: Arc<dyn Fn() + Send + Sync>,
@@ -86,7 +86,7 @@ impl BackendCommandSender {
 }
 
 impl BackendProxy {
-    #[cfg(any(not(target_os = "macos"), test))]
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn new(
         sender: Sender<BackendCommand>,
         wake: Arc<dyn Fn() + Send + Sync>,
@@ -110,7 +110,7 @@ impl BackendProxy {
 
     pub(crate) fn sender(&self) -> BackendCommandSender {
         match &self.inner {
-            #[cfg(any(not(target_os = "macos"), test))]
+            #[cfg(not(target_os = "macos"))]
             BackendProxyInner::Threaded { sender, .. } => sender.clone(),
             #[cfg(target_os = "macos")]
             BackendProxyInner::Direct { sender } => sender.clone(),
@@ -119,7 +119,7 @@ impl BackendProxy {
 
     pub(crate) fn close_and_join(&self) -> TrayResult<()> {
         match &self.inner {
-            #[cfg(any(not(target_os = "macos"), test))]
+            #[cfg(not(target_os = "macos"))]
             BackendProxyInner::Threaded { sender, join } => {
                 let join = join
                     .lock()
@@ -195,59 +195,64 @@ fn validate_id(id: &MenuItemId, seen: &mut HashSet<MenuItemId>) -> TrayResult<()
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex, mpsc};
+    #[cfg(not(target_os = "macos"))]
+    mod threaded {
+        use std::sync::{Arc, Mutex, mpsc};
 
-    use super::*;
-    use crate::{Menu, MenuNode, TrayEvent};
+        use super::super::*;
+        use crate::{Menu, MenuNode, TrayEvent};
 
-    #[test]
-    fn redundant_state_update_is_not_queued() {
-        let (tx, rx) = mpsc::channel();
-        let wake_count = Arc::new(Mutex::new(0usize));
-        let wake_count_for_sender = wake_count.clone();
-        let sender = BackendCommandSender::channel(
-            tx,
-            Arc::new(move || {
-                *wake_count_for_sender.lock().unwrap() += 1;
-            }),
-        );
-        let mut last = Some(TrayState::new());
-        let state = TrayState::new();
+        #[test]
+        fn redundant_state_update_is_not_queued() {
+            let (tx, rx) = mpsc::channel();
+            let wake_count = Arc::new(Mutex::new(0usize));
+            let wake_count_for_sender = wake_count.clone();
+            let sender = BackendCommandSender::channel(
+                tx,
+                Arc::new(move || {
+                    *wake_count_for_sender.lock().unwrap() += 1;
+                }),
+            );
+            let mut last = Some(TrayState::new());
+            let state = TrayState::new();
 
-        crate::tray::set_state_inner(&sender, &mut last, state).unwrap();
+            crate::tray::set_state_inner(&sender, &mut last, state).unwrap();
 
-        assert!(rx.try_recv().is_err());
-        assert_eq!(*wake_count.lock().unwrap(), 0);
-    }
+            assert!(rx.try_recv().is_err());
+            assert_eq!(*wake_count.lock().unwrap(), 0);
+        }
 
-    #[test]
-    fn invalid_state_update_is_not_queued() {
-        let (tx, rx) = mpsc::channel();
-        let sender = BackendCommandSender::channel(tx, Arc::new(|| {}));
-        let mut last = Some(TrayState::new());
-        let state = TrayState::new().with_menu(Menu::new([MenuNode::item("", "Empty")]));
+        #[test]
+        fn invalid_state_update_is_not_queued() {
+            let (tx, rx) = mpsc::channel();
+            let sender = BackendCommandSender::channel(tx, Arc::new(|| {}));
+            let mut last = Some(TrayState::new());
+            let state = TrayState::new().with_menu(Menu::new([MenuNode::item("", "Empty")]));
 
-        assert!(crate::tray::set_state_inner(&sender, &mut last, state).is_err());
-        assert!(rx.try_recv().is_err());
-    }
+            assert!(crate::tray::set_state_inner(&sender, &mut last, state).is_err());
+            assert!(rx.try_recv().is_err());
+        }
 
-    #[test]
-    fn event_sink_can_update_state_immediately() {
-        let (tx, rx) = mpsc::channel();
-        let sender = BackendCommandSender::channel(tx, Arc::new(|| {}));
-        let last = Arc::new(Mutex::new(Some(TrayState::new())));
-        let handle = crate::TrayHandle::new(sender, last.clone());
+        #[test]
+        fn event_sink_can_update_state_immediately() {
+            let (tx, rx) = mpsc::channel();
+            let sender = BackendCommandSender::channel(tx, Arc::new(|| {}));
+            let last = Arc::new(Mutex::new(Some(TrayState::new())));
+            let handle = crate::TrayHandle::new(sender, last.clone());
 
-        let sink = move |_event: TrayEvent| {
-            handle
-                .set_state(TrayState::new().with_menu(Menu::new([MenuNode::item("quit", "Quit")])))
-                .unwrap();
-        };
+            let sink = move |_event: TrayEvent| {
+                handle
+                    .set_state(
+                        TrayState::new().with_menu(Menu::new([MenuNode::item("quit", "Quit")])),
+                    )
+                    .unwrap();
+            };
 
-        sink(TrayEvent::MenuItemActivated {
-            item_id: "open".into(),
-        });
+            sink(TrayEvent::MenuItemActivated {
+                item_id: "open".into(),
+            });
 
-        assert!(matches!(rx.try_recv(), Ok(BackendCommand::SetState(_))));
+            assert!(matches!(rx.try_recv(), Ok(BackendCommand::SetState(_))));
+        }
     }
 }

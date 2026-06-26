@@ -10,6 +10,10 @@ linux-zbus-tokio = ["dep:tokio", "zbus/tokio"]
 
 [dependencies]
 
+[dev-dependencies]
+winit = "0.30.13"
+anyhow = "1"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
