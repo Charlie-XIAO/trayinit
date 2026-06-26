@@ -1,7 +1,7 @@
 use trayinit::{Icon, Menu, MenuNode, Tray, TrayEvent, TrayState, channel};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let icon = Icon::from_rgba(checker_icon_rgba(64), 64, 64)?;
+    let icon = Icon::from_rgba(checker_icon_rgba(32), 32, 32)?;
 
     let state = TrayState::new()
         .with_title("trayinit")
