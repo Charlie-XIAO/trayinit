@@ -139,18 +139,19 @@ async fn run_backend(
         if let Some(changes) = &mut watcher_changes {
             tokio::select! {
                 event = changes.next() => {
-                    if let Some(event) = event {
-                        if let Ok(args) = event.args() {
-                            if args.new_owner.as_ref().is_some() {
-                                register_with_watcher(&conn, &identity, &service).await;
-                            } else {
-                                emit_status(
-                                    &service,
-                                    TrayStatus::TemporarilyUnavailable(
-                                        "StatusNotifierWatcher disappeared".into(),
-                                    ),
-                                ).await;
-                            }
+                    if let Some(event) = event
+                        && let Ok(args) = event.args()
+                    {
+                        if args.new_owner.as_ref().is_some() {
+                            register_with_watcher(&conn, &identity, &service).await;
+                        } else {
+                            emit_status(
+                                &service,
+                                TrayStatus::TemporarilyUnavailable(
+                                    "StatusNotifierWatcher disappeared".into(),
+                                ),
+                            )
+                            .await;
                         }
                     }
                 }
