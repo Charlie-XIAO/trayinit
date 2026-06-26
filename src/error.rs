@@ -8,6 +8,7 @@ pub type TrayResult<T> = Result<T, TrayError>;
 pub enum TrayError {
     InvalidState(InvalidState),
     UnsupportedPlatform,
+    NotMainThread,
     BackendUnavailable(String),
     CommandQueueClosed,
     ThreadInit(String),
@@ -27,6 +28,7 @@ impl fmt::Display for TrayError {
             Self::UnsupportedPlatform => {
                 write!(f, "tray backend is not available on this platform")
             },
+            Self::NotMainThread => write!(f, "tray backend operation must run on the main thread"),
             Self::BackendUnavailable(err) => write!(f, "tray backend is unavailable: {err}"),
             Self::CommandQueueClosed => write!(f, "tray backend command queue is closed"),
             Self::ThreadInit(err) => write!(f, "tray backend thread failed to initialize: {err}"),

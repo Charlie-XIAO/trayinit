@@ -1,11 +1,19 @@
+#[cfg(any(target_os = "windows", target_os = "linux", test))]
 pub(crate) mod plan;
 
 use std::collections::HashSet;
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
+#[cfg(any(not(target_os = "macos"), test))]
 use std::sync::mpsc::Sender;
+#[cfg(any(not(target_os = "macos"), test))]
 use std::sync::{Arc, Mutex};
+#[cfg(any(not(target_os = "macos"), test))]
 use std::thread::JoinHandle;
 
-use crate::{InvalidState, Menu, MenuItemId, MenuNode, TrayError, TrayResult, TrayState};
+#[cfg(any(not(target_os = "macos"), test))]
+use crate::TrayError;
+use crate::{InvalidState, Menu, MenuItemId, MenuNode, TrayResult, TrayState};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BackendCommand {
@@ -15,61 +23,126 @@ pub(crate) enum BackendCommand {
 
 #[derive(Clone)]
 pub(crate) struct BackendCommandSender {
-    sender: Sender<BackendCommand>,
-    wake: Arc<dyn Fn() + Send + Sync>,
+    inner: BackendCommandSenderInner,
+}
+
+#[derive(Clone)]
+enum BackendCommandSenderInner {
+    #[cfg(any(not(target_os = "macos"), test))]
+    Channel {
+        sender: Sender<BackendCommand>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    },
+    #[cfg(target_os = "macos")]
+    Direct(Rc<dyn Fn(BackendCommand) -> TrayResult<()>>),
+}
+
+enum BackendProxyInner {
+    #[cfg(any(not(target_os = "macos"), test))]
+    Threaded {
+        sender: BackendCommandSender,
+        join: Mutex<Option<JoinHandle<()>>>,
+    },
+    #[cfg(target_os = "macos")]
+    Direct { sender: BackendCommandSender },
 }
 
 pub(crate) struct BackendProxy {
-    sender: BackendCommandSender,
-    join: Mutex<Option<JoinHandle<()>>>,
+    inner: BackendProxyInner,
 }
 
 impl BackendCommandSender {
     pub(crate) fn send(&self, command: BackendCommand) -> TrayResult<()> {
-        self.sender
-            .send(command)
-            .map_err(|_| TrayError::CommandQueueClosed)?;
-        (self.wake)();
-        Ok(())
+        match &self.inner {
+            #[cfg(any(not(target_os = "macos"), test))]
+            BackendCommandSenderInner::Channel { sender, wake } => {
+                sender
+                    .send(command)
+                    .map_err(|_| TrayError::CommandQueueClosed)?;
+                (wake)();
+                Ok(())
+            },
+            #[cfg(target_os = "macos")]
+            BackendCommandSenderInner::Direct(dispatch) => dispatch(command),
+        }
+    }
+
+    #[cfg(any(not(target_os = "macos"), test))]
+    pub(crate) fn channel(
+        sender: Sender<BackendCommand>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Self {
+        Self {
+            inner: BackendCommandSenderInner::Channel { sender, wake },
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn direct(dispatch: Rc<dyn Fn(BackendCommand) -> TrayResult<()>>) -> Self {
+        Self {
+            inner: BackendCommandSenderInner::Direct(dispatch),
+        }
     }
 }
 
 impl BackendProxy {
+    #[cfg(any(not(target_os = "macos"), test))]
     pub(crate) fn new(
         sender: Sender<BackendCommand>,
         wake: Arc<dyn Fn() + Send + Sync>,
         join: JoinHandle<()>,
     ) -> Self {
+        let sender = BackendCommandSender::channel(sender, wake);
         Self {
-            sender: BackendCommandSender { sender, wake },
-            join: Mutex::new(Some(join)),
+            inner: BackendProxyInner::Threaded {
+                sender,
+                join: Mutex::new(Some(join)),
+            },
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn new_direct(sender: BackendCommandSender) -> Self {
+        Self {
+            inner: BackendProxyInner::Direct { sender },
         }
     }
 
     pub(crate) fn sender(&self) -> BackendCommandSender {
-        self.sender.clone()
+        match &self.inner {
+            #[cfg(any(not(target_os = "macos"), test))]
+            BackendProxyInner::Threaded { sender, .. } => sender.clone(),
+            #[cfg(target_os = "macos")]
+            BackendProxyInner::Direct { sender } => sender.clone(),
+        }
     }
 
     pub(crate) fn close_and_join(&self) -> TrayResult<()> {
-        let join = self
-            .join
-            .lock()
-            .map_err(|_| TrayError::BackendUnavailable("join lock poisoned".into()))?
-            .take();
+        match &self.inner {
+            #[cfg(any(not(target_os = "macos"), test))]
+            BackendProxyInner::Threaded { sender, join } => {
+                let join = join
+                    .lock()
+                    .map_err(|_| TrayError::BackendUnavailable("join lock poisoned".into()))?
+                    .take();
 
-        let Some(join) = join else {
-            return Ok(());
-        };
+                let Some(join) = join else {
+                    return Ok(());
+                };
 
-        let send_result = self.sender.send(BackendCommand::Close);
+                let send_result = sender.send(BackendCommand::Close);
 
-        if join.join().is_err() {
-            return Err(TrayError::BackendUnavailable(
-                "backend thread panicked during shutdown".into(),
-            ));
+                if join.join().is_err() {
+                    return Err(TrayError::BackendUnavailable(
+                        "backend thread panicked during shutdown".into(),
+                    ));
+                }
+
+                send_result
+            },
+            #[cfg(target_os = "macos")]
+            BackendProxyInner::Direct { sender } => sender.send(BackendCommand::Close),
         }
-
-        send_result
     }
 }
 
@@ -132,12 +205,12 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let wake_count = Arc::new(Mutex::new(0usize));
         let wake_count_for_sender = wake_count.clone();
-        let sender = BackendCommandSender {
-            sender: tx,
-            wake: Arc::new(move || {
+        let sender = BackendCommandSender::channel(
+            tx,
+            Arc::new(move || {
                 *wake_count_for_sender.lock().unwrap() += 1;
             }),
-        };
+        );
         let mut last = Some(TrayState::new());
         let state = TrayState::new();
 
@@ -150,10 +223,7 @@ mod tests {
     #[test]
     fn invalid_state_update_is_not_queued() {
         let (tx, rx) = mpsc::channel();
-        let sender = BackendCommandSender {
-            sender: tx,
-            wake: Arc::new(|| {}),
-        };
+        let sender = BackendCommandSender::channel(tx, Arc::new(|| {}));
         let mut last = Some(TrayState::new());
         let state = TrayState::new().with_menu(Menu::new([MenuNode::item("", "Empty")]));
 
@@ -164,10 +234,7 @@ mod tests {
     #[test]
     fn event_sink_can_update_state_immediately() {
         let (tx, rx) = mpsc::channel();
-        let sender = BackendCommandSender {
-            sender: tx,
-            wake: Arc::new(|| {}),
-        };
+        let sender = BackendCommandSender::channel(tx, Arc::new(|| {}));
         let last = Arc::new(Mutex::new(Some(TrayState::new())));
         let handle = crate::TrayHandle::new(sender, last.clone());
 

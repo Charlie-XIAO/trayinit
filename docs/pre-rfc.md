@@ -1033,15 +1033,21 @@ Goals:
 Goals:
 
 - Implement `NSStatusItem` and `NSMenu`.
-- Enforce main-thread creation and mutation.
+- Enforce main-thread creation, state updates, and shutdown.
 - Support icon, title, tooltip, menu, and menu item activation.
-- Support template icons.
+- Rebuild native `NSMenu` trees from the declarative menu model.
+- Support no-menu primary icon activation when straightforward.
+- Defer template icons and custom secondary-click menu policy until manual
+  macOS testing proves the required platform-specific API shape.
 - Provide cleanup on drop/shutdown.
 
 Constraint:
 
 - The maintainer does not currently have a macOS machine at hand, so this stage
   should be more conservative and may need outside testing.
+- Stage 3 does not provide cross-thread macOS `TrayHandle` updates. Apps should
+  route background work into the main-thread application loop before calling
+  `set_state`.
 
 ### Stage 4: Winit example
 

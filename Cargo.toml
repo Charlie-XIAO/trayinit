@@ -29,3 +29,36 @@ tokio = { version = "1", default-features = false, features = [
   "time",
 ], optional = true }
 zbus = { version = "5", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
+  "NSButton",
+  "NSCell",
+  "NSControl",
+  "NSImage",
+  "NSMenu",
+  "NSMenuItem",
+  "NSResponder",
+  "NSStatusBar",
+  "NSStatusBarButton",
+  "NSStatusItem",
+  "NSView",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "CFCGTypes",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "block2",
+  "objc2-core-foundation",
+  "NSData",
+  "NSGeometry",
+  "NSObject",
+  "NSString",
+  "NSThread",
+] }
+png = "0.18"
