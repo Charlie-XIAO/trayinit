@@ -5,13 +5,13 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-use futures_util::StreamExt;
-use tokio::runtime::Builder as RuntimeBuilder;
+use futures_util::{FutureExt, StreamExt, pin_mut, select};
 use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedValue, Str, Value};
 
 use super::menu::{LinuxMenu, LinuxMenuNode, LinuxMenuProperties, ROOT_ID, icon_rgba_to_argb};
+use super::runtime;
 use crate::backend::{BackendCommand, BackendProxy};
 use crate::{
     EventSink, TrayError, TrayEvent, TrayIconEventKind, TrayResult, TrayState, TrayStatus,
@@ -48,19 +48,15 @@ fn backend_thread(
     command_rx: Receiver<BackendCommand>,
     init_tx: mpsc::Sender<TrayResult<()>>,
 ) {
-    let runtime = match RuntimeBuilder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            let _ = init_tx.send(Err(TrayError::ThreadInit(err.to_string())));
-            return;
-        },
-    };
-
-    runtime.block_on(run_backend(initial_state, sink, command_rx, init_tx));
+    let result = runtime::run(run_backend(
+        initial_state,
+        sink,
+        command_rx,
+        init_tx.clone(),
+    ));
+    if let Err(err) = result {
+        let _ = init_tx.send(Err(err));
+    }
 }
 
 async fn run_backend(
@@ -75,7 +71,7 @@ async fn run_backend(
         INSTANCE_COUNTER.fetch_add(1, Ordering::AcqRel)
     );
 
-    let service = Arc::new(tokio::sync::Mutex::new(LinuxService::new(
+    let service = Arc::new(runtime::Mutex::new(LinuxService::new(
         identity.clone(),
         initial_state,
         sink,
@@ -137,8 +133,11 @@ async fn run_backend(
         }
 
         if let Some(changes) = &mut watcher_changes {
-            tokio::select! {
-                event = changes.next() => {
+            let event = changes.next().fuse();
+            let timeout = runtime::sleep(Duration::from_millis(25)).fuse();
+            pin_mut!(event, timeout);
+            select! {
+                event = event => {
                     if let Some(event) = event
                         && let Ok(args) = event.args()
                     {
@@ -155,10 +154,10 @@ async fn run_backend(
                         }
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+                _ = timeout => {}
             }
         } else {
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            runtime::sleep(Duration::from_millis(25)).await;
         }
     }
 
@@ -173,7 +172,7 @@ enum CommandOutcome {
 async fn drain_commands(
     command_rx: &Receiver<BackendCommand>,
     conn: &Connection,
-    service: &Arc<tokio::sync::Mutex<LinuxService>>,
+    service: &Arc<runtime::Mutex<LinuxService>>,
 ) -> CommandOutcome {
     loop {
         match command_rx.try_recv() {
@@ -192,7 +191,7 @@ async fn drain_commands(
 async fn register_with_watcher(
     conn: &Connection,
     identity: &str,
-    service: &Arc<tokio::sync::Mutex<LinuxService>>,
+    service: &Arc<runtime::Mutex<LinuxService>>,
 ) {
     let proxy = match StatusNotifierWatcherProxy::new(conn).await {
         Ok(proxy) => proxy,
@@ -231,7 +230,7 @@ async fn register_with_watcher(
     }
 }
 
-async fn emit_status(service: &Arc<tokio::sync::Mutex<LinuxService>>, status: TrayStatus) {
+async fn emit_status(service: &Arc<runtime::Mutex<LinuxService>>, status: TrayStatus) {
     let sink = {
         let service = service.lock().await;
         service.sink.clone()
@@ -241,7 +240,7 @@ async fn emit_status(service: &Arc<tokio::sync::Mutex<LinuxService>>, status: Tr
 
 async fn apply_state(
     conn: &Connection,
-    service: &Arc<tokio::sync::Mutex<LinuxService>>,
+    service: &Arc<runtime::Mutex<LinuxService>>,
     state: TrayState,
 ) -> zbus::Result<()> {
     let changes = {
@@ -365,11 +364,11 @@ impl LinuxService {
 }
 
 struct StatusNotifierItemIface {
-    service: Arc<tokio::sync::Mutex<LinuxService>>,
+    service: Arc<runtime::Mutex<LinuxService>>,
 }
 
 impl StatusNotifierItemIface {
-    fn new(service: Arc<tokio::sync::Mutex<LinuxService>>) -> Self {
+    fn new(service: Arc<runtime::Mutex<LinuxService>>) -> Self {
         Self { service }
     }
 }
@@ -515,11 +514,11 @@ impl StatusNotifierItemIface {
 }
 
 struct DbusMenuIface {
-    service: Arc<tokio::sync::Mutex<LinuxService>>,
+    service: Arc<runtime::Mutex<LinuxService>>,
 }
 
 impl DbusMenuIface {
-    fn new(service: Arc<tokio::sync::Mutex<LinuxService>>) -> Self {
+    fn new(service: Arc<runtime::Mutex<LinuxService>>) -> Self {
         Self { service }
     }
 }

@@ -4,22 +4,28 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = []
-linux-zbus-tokio = []
-linux-zbus-async-io = []
+default = ["linux-zbus-async-io"]
+linux-zbus-async-io = ["dep:async-io", "dep:async-lock", "zbus/async-io"]
+linux-zbus-tokio = ["dep:tokio", "zbus/tokio"]
 
 [dependencies]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_System_LibraryLoader",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-futures-util = "0.3"
-tokio = { version = "1", default-features = false, features = ["macros", "rt", "sync", "time"] }
-zbus = { version = "5", default-features = false, features = ["tokio"] }
+async-io = { version = "2", optional = true }
+async-lock = { version = "3", optional = true }
+futures-util = { version = "0.3" }
+tokio = { version = "1", default-features = false, features = [
+  "rt",
+  "sync",
+  "time",
+], optional = true }
+zbus = { version = "5", default-features = false }

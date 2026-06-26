@@ -295,8 +295,8 @@ Linux:
 - SNI and DBusMenu are async DBus services.
 - The backend does not need to share a winit event loop.
 - A backend-managed async runtime/task is acceptable. Stage 2 uses zbus on a
-  backend-owned current-thread Tokio runtime as a Linux-only implementation
-  detail; no async runtime leaks into the public API.
+  backend-owned runtime with real `linux-zbus-async-io` and `linux-zbus-tokio`
+  feature switches; no async runtime leaks into the public API.
 - The crate should not require GTK or a GLib main loop.
 - Multiple `Tray` instances are supported by giving each instance its own zbus
   connection and generated `org.kde.StatusNotifierItem-{pid}-{counter}` service
@@ -635,17 +635,29 @@ Recommended initial flags:
 
 ```toml
 [features]
-default = ["platform"]
-platform = []
+default = ["linux-zbus-async-io"]
+linux-zbus-async-io = [
+    "dep:async-io",
+    "dep:async-lock",
+    "zbus/async-io",
+]
+linux-zbus-tokio = [
+    "dep:tokio",
+    "zbus/tokio",
+]
 winit = ["dep:winit"]
 serde = ["dep:serde"]
-linux-zbus-async-io = []
-linux-zbus-tokio = []
 ```
 
 Notes:
 
-- The exact Linux runtime features should be finalized during the Linux stage.
+- Linux runtime features are real switches. `linux-zbus-async-io` is the
+  default so downstream apps are not forced to pull in Tokio. Apps that prefer
+  Tokio should disable default features and enable `linux-zbus-tokio`.
+- `zbus` and `futures-util` are required Linux backend dependencies. The runtime
+  features select only the concrete runtime crates and zbus runtime feature.
+- On Linux, selecting both Linux runtime features or selecting neither is a
+  compile-time error. Non-Linux builds do not require a Linux runtime feature.
 - The Windows stage should not add Linux or macOS dependencies.
 - The core should not depend on `winit` unless `winit` is enabled.
 
@@ -885,17 +897,21 @@ Choose backend-managed platform work for v1.
 
 ### Linux DBus async runtime strategy
 
-Recommended v1 direction:
+Current Stage 2 direction:
 
-- Start with a backend-managed `zbus` async-io style runtime to avoid requiring
-  Tokio.
-- Add optional Tokio support later if it is clearly useful.
+- Uses a backend-managed `zbus` runtime selected by feature flag.
+- Defaults to `async-io` to avoid forcing Tokio into downstream apps with their
+  own runtime switches, such as iced applications using smol.
+- Supports Tokio as an opt-in runtime for applications that already use Tokio.
+- Keeps the runtime Linux-only and backend-internal; no async runtime type or
+  async constructor leaks into the portable public API.
+- Rejects both-runtime and no-runtime Linux builds at compile time.
 - Do not require GLib.
 - Keep the DBus runtime boundary backend-internal.
 - Do not expose async constructors in the portable API unless a later platform
   constraint makes that unavoidable.
-- Initial watcher/host absence should be a creation error unless soft-start is
-  enabled.
+- Initial watcher/host absence should soft-start successfully and emit
+  `TrayStatus::TemporarilyUnavailable`.
 - Later watcher loss or recovery should be reported through runtime status
   events.
 
