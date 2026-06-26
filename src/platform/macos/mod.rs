@@ -7,8 +7,8 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AnyThread, DeclaredClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu,
-    NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSApplication, NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSImage,
+    NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
@@ -22,6 +22,9 @@ pub(crate) fn spawn(
     sink: Arc<dyn EventSink>,
 ) -> TrayResult<BackendProxy> {
     let mtm = MainThreadMarker::new().ok_or(TrayError::NotMainThread)?;
+    // Standalone tray-only processes may not have initialized AppKit before
+    // constructing the tray. Do this without changing app activation policy.
+    let _ = NSApplication::sharedApplication(mtm);
     let backend = Rc::new(RefCell::new(MacosBackend::new(initial_state, sink, mtm)?));
     let dispatch_backend = backend.clone();
 
