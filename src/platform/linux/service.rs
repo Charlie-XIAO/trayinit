@@ -48,7 +48,11 @@ fn backend_thread(
     command_rx: Receiver<BackendCommand>,
     init_tx: mpsc::Sender<TrayResult<()>>,
 ) {
-    let runtime = match RuntimeBuilder::new_current_thread().enable_time().build() {
+    let runtime = match RuntimeBuilder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+    {
         Ok(runtime) => runtime,
         Err(err) => {
             let _ = init_tx.send(Err(TrayError::ThreadInit(err.to_string())));
