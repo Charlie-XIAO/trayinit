@@ -39,7 +39,7 @@ pub(crate) fn spawn(
         TrayError::ThreadInit("backend thread exited during initialization".into())
     })??;
 
-    Ok(BackendRuntime::threaded(command_tx, Arc::new(|| {}), join))
+    Ok(BackendRuntime::new(command_tx, Arc::new(|| {}), join))
 }
 
 fn backend_thread(

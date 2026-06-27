@@ -54,7 +54,7 @@ pub(crate) fn spawn(
         let _ = PostMessageW(hwnd as HWND, WM_BACKEND_COMMAND, 0, 0);
     });
 
-    Ok(BackendRuntime::threaded(command_tx, wake, join))
+    Ok(BackendRuntime::new(command_tx, wake, join))
 }
 
 fn backend_thread(

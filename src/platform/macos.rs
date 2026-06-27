@@ -28,12 +28,12 @@ pub(crate) fn spawn(
     let backend = Rc::new(RefCell::new(MacosBackend::new(initial_state, sink, mtm)?));
     let dispatch_backend = backend.clone();
 
-    let sender = BackendCommandSender::direct(Rc::new(move |command| {
+    let sender = BackendCommandSender::new(Rc::new(move |command| {
         let mtm = MainThreadMarker::new().ok_or(TrayError::NotMainThread)?;
         dispatch_backend.borrow_mut().handle_command(command, mtm)
     }));
 
-    Ok(BackendRuntime::direct(sender))
+    Ok(BackendRuntime::new(sender))
 }
 
 struct MacosBackend {
