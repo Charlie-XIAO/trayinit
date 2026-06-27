@@ -79,7 +79,10 @@ impl BackendRuntime {
                     ));
                 }
 
-                send_result
+                match send_result {
+                    Err(TrayError::CommandQueueClosed) => Ok(()),
+                    result => result,
+                }
             },
             #[cfg(target_os = "macos")]
             BackendRuntimeInner::Direct { sender } => {
@@ -90,6 +93,29 @@ impl BackendRuntime {
                 *sender = None;
                 Ok(())
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    mod threaded {
+        use std::sync::{Arc, mpsc};
+        use std::thread;
+
+        use super::super::*;
+
+        #[test]
+        fn shutdown_succeeds_if_thread_already_exited() {
+            let (tx, rx) = mpsc::channel();
+            let join = thread::spawn(move || {
+                drop(rx);
+            });
+            let mut runtime = BackendRuntime::threaded(tx, Arc::new(|| {}), join);
+
+            assert_eq!(runtime.shutdown(), Ok(()));
+            assert_eq!(runtime.shutdown(), Ok(()));
         }
     }
 }
