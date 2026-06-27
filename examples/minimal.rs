@@ -6,7 +6,7 @@ use trayinit::{Menu, MenuNode, Tray, TrayEvent, TrayState};
 const OPEN_ID: &str = "open";
 const QUIT_ID: &str = "quit";
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn main() -> Result<()> {
     let (sink, events) = trayinit::channel();
     let tray = Tray::new(tray_state()?, sink)?;

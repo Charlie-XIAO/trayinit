@@ -12,7 +12,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
-use crate::backend::{BackendCommand, BackendCommandSender, BackendProxy};
+use crate::backend::{BackendCommand, BackendCommandSender, BackendRuntime};
 use crate::{
     EventSink, Icon, Menu, MenuNode, TrayError, TrayEvent, TrayIconEventKind, TrayResult, TrayState,
 };
@@ -20,7 +20,7 @@ use crate::{
 pub(crate) fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
-) -> TrayResult<BackendProxy> {
+) -> TrayResult<BackendRuntime> {
     let mtm = MainThreadMarker::new().ok_or(TrayError::NotMainThread)?;
     // Standalone tray-only processes may not have initialized AppKit before
     // constructing the tray. Do this without changing app activation policy.
@@ -33,7 +33,7 @@ pub(crate) fn spawn(
         dispatch_backend.borrow_mut().handle_command(command, mtm)
     }));
 
-    Ok(BackendProxy::new_direct(sender))
+    Ok(BackendRuntime::direct(sender))
 }
 
 struct MacosBackend {

@@ -12,7 +12,7 @@ use zbus::zvariant::{ObjectPath, OwnedValue, Str, Value};
 
 use super::menu::{LinuxMenu, LinuxMenuNode, LinuxMenuProperties, ROOT_ID, icon_rgba_to_argb};
 use super::runtime;
-use crate::backend::{BackendCommand, BackendProxy};
+use crate::backend::{BackendCommand, BackendRuntime};
 use crate::{
     EventSink, TrayError, TrayEvent, TrayIconEventKind, TrayResult, TrayState, TrayStatus,
 };
@@ -26,7 +26,7 @@ static INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(1);
 pub(crate) fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
-) -> TrayResult<BackendProxy> {
+) -> TrayResult<BackendRuntime> {
     let (command_tx, command_rx) = mpsc::channel();
     let (init_tx, init_rx) = mpsc::channel();
 
@@ -39,7 +39,7 @@ pub(crate) fn spawn(
         TrayError::ThreadInit("backend thread exited during initialization".into())
     })??;
 
-    Ok(BackendProxy::new(command_tx, Arc::new(|| {}), join))
+    Ok(BackendRuntime::threaded(command_tx, Arc::new(|| {}), join))
 }
 
 fn backend_thread(

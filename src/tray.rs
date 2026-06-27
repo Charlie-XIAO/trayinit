@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
-use crate::backend::{self, BackendCommand, BackendCommandSender, BackendProxy};
+use crate::backend::{self, BackendCommand, BackendCommandSender, BackendRuntime};
 use crate::{EventSink, TrayError, TrayResult, TrayState};
 
 pub struct Tray {
-    backend: BackendProxy,
+    backend: BackendRuntime,
     last_state: Arc<Mutex<Option<TrayState>>>,
 }
 
@@ -39,14 +39,14 @@ impl Tray {
         self.handle().set_state(state)
     }
 
-    pub fn shutdown(self) -> TrayResult<()> {
-        self.backend.close_and_join()
+    pub fn shutdown(mut self) -> TrayResult<()> {
+        self.backend.shutdown()
     }
 }
 
 impl Drop for Tray {
     fn drop(&mut self) {
-        let _ = self.backend.close_and_join();
+        let _ = self.backend.shutdown();
     }
 }
 

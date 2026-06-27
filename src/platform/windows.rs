@@ -24,7 +24,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::backend::plan::{BackendCommandId, MenuPlan, PlannedNode, PlannedNodeKind, plan_menu};
-use crate::backend::{BackendCommand, BackendProxy};
+use crate::backend::{BackendCommand, BackendRuntime};
 use crate::{
     ActivationMode, EventSink, Icon, MenuItemId, TrayError, TrayEvent, TrayIconEventKind,
     TrayResult, TrayState, TrayStatus,
@@ -37,7 +37,7 @@ const WM_BACKEND_COMMAND: u32 = WM_APP + 2;
 pub(crate) fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
-) -> TrayResult<BackendProxy> {
+) -> TrayResult<BackendRuntime> {
     let (command_tx, command_rx) = mpsc::channel();
     let (init_tx, init_rx) = mpsc::channel();
 
@@ -54,7 +54,7 @@ pub(crate) fn spawn(
         let _ = PostMessageW(hwnd as HWND, WM_BACKEND_COMMAND, 0, 0);
     });
 
-    Ok(BackendProxy::new(command_tx, wake, join))
+    Ok(BackendRuntime::threaded(command_tx, wake, join))
 }
 
 fn backend_thread(
