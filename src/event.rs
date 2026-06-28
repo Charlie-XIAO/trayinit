@@ -22,9 +22,10 @@ pub enum TrayEvent {
     /// The backend observed an activation gesture on the tray icon.
     ///
     /// Native tray hosts do not expose identical activation hooks on every
-    /// platform. On Windows, a menu-opening click emits this event before any
-    /// resulting [`TrayEvent::MenuItemActivated`]. Other backends may only emit
-    /// icon activation for gestures that are exposed by the desktop host.
+    /// platform. On Windows and macOS, a menu-opening click emits this event
+    /// before any resulting [`TrayEvent::MenuItemActivated`]. Other backends
+    /// may only emit icon activation for gestures that are exposed by the
+    /// desktop host.
     IconActivated {
         kind: TrayIconEventKind,
         position: Option<PhysicalPosition>,

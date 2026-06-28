@@ -5,16 +5,17 @@ use std::sync::Arc;
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{AnyThread, DeclaredClass, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{AnyThread, DeclaredClass, MainThreadOnly, Message, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSImage,
-    NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSApplication, NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
+    NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSView,
 };
-use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
+use objc2_foundation::{MainThreadMarker, NSData, NSSize, NSString};
 
 use crate::backend::{BackendCommand, BackendCommandSender, BackendRuntime};
 use crate::{
-    EventSink, Icon, Menu, MenuNode, TrayError, TrayEvent, TrayIconEventKind, TrayResult, TrayState,
+    ActivationMode, EventSink, Icon, Menu, MenuNode, TrayError, TrayEvent, TrayIconEventKind,
+    TrayResult, TrayState,
 };
 
 pub(crate) fn spawn(
@@ -40,7 +41,7 @@ struct MacosBackend {
     state: TrayState,
     sink: Arc<dyn EventSink>,
     status_item: Option<Retained<NSStatusItem>>,
-    button_target: Option<Retained<ButtonTarget>>,
+    tray_target: Option<Retained<TrayTarget>>,
     menu: Option<Retained<NSMenu>>,
 }
 
@@ -50,7 +51,7 @@ impl MacosBackend {
             state,
             sink,
             status_item: None,
-            button_target: None,
+            tray_target: None,
             menu: None,
         };
         backend.rebuild(mtm)?;
@@ -87,6 +88,7 @@ impl MacosBackend {
         set_status_title(status_item, self.state.title.as_deref(), mtm)?;
         set_status_tooltip(status_item, self.state.tooltip.as_deref(), mtm)?;
         self.rebuild_menu(mtm)?;
+        self.sync_tray_target(mtm);
 
         Ok(())
     }
@@ -94,44 +96,62 @@ impl MacosBackend {
     fn rebuild_menu(&mut self, mtm: MainThreadMarker) -> TrayResult<()> {
         let Some(status_item) = &self.status_item else {
             self.menu = None;
-            self.button_target = None;
+            self.tray_target = None;
             return Ok(());
         };
 
         if let Some(menu) = &self.state.menu {
             let ns_menu = build_menu(menu, self.sink.clone(), mtm)?;
-            unsafe {
-                ns_menu.setAutoenablesItems(false);
-                status_item.setMenu(Some(&ns_menu));
-                if let Some(button) = status_item.button(mtm) {
-                    button.setTarget(None);
-                    button.setAction(None);
-                }
-            }
+            ns_menu.setAutoenablesItems(false);
+            status_item.setMenu(Some(&ns_menu));
             self.menu = Some(ns_menu);
-            self.button_target = None;
         } else {
             status_item.setMenu(None);
             self.menu = None;
-
-            let target = ButtonTarget::new(mtm, self.sink.clone());
-            if let Some(button) = status_item.button(mtm) {
-                unsafe {
-                    button.setTarget(Some(&target));
-                    button.setAction(Some(sel!(performTrayAction:)));
-                }
-            }
-            self.button_target = Some(target);
         }
 
         Ok(())
     }
 
+    fn sync_tray_target(&mut self, mtm: MainThreadMarker) {
+        let Some(status_item) = &self.status_item else {
+            self.tray_target = None;
+            return;
+        };
+        let Some(button) = status_item.button(mtm) else {
+            return;
+        };
+
+        let target = match &self.tray_target {
+            Some(target) => target.clone(),
+            None => {
+                let target = TrayTarget::new(
+                    mtm,
+                    status_item,
+                    self.sink.clone(),
+                    self.state.activation_mode,
+                );
+                button.addSubview(&target);
+                self.tray_target = Some(target.clone());
+                target
+            },
+        };
+
+        target.update(
+            status_item,
+            self.menu.as_ref(),
+            self.state.activation_mode,
+            mtm,
+        );
+    }
+
     fn remove(&mut self) {
+        if let Some(tray_target) = self.tray_target.take() {
+            tray_target.removeFromSuperview();
+        }
         if let Some(status_item) = self.status_item.take() {
             NSStatusBar::systemStatusBar().removeStatusItem(&status_item);
         }
-        self.button_target = None;
         self.menu = None;
     }
 }
@@ -267,33 +287,118 @@ fn ns_image_from_icon(icon: &Icon) -> TrayResult<Retained<NSImage>> {
     Ok(image)
 }
 
-struct ButtonTargetIvars {
+struct TrayTargetIvars {
     sink: Arc<dyn EventSink>,
+    status_item: Retained<NSStatusItem>,
+    menu: RefCell<Option<Retained<NSMenu>>>,
+    activation_mode: std::cell::Cell<ActivationMode>,
 }
 
 define_class!(
-    #[unsafe(super(NSObject))]
-    #[name = "TrayinitButtonTarget"]
+    #[unsafe(super(NSView))]
+    #[name = "TrayinitTargetView"]
     #[thread_kind = MainThreadOnly]
-    #[ivars = ButtonTargetIvars]
-    struct ButtonTarget;
+    #[ivars = TrayTargetIvars]
+    struct TrayTarget;
 
-    impl ButtonTarget {
-        #[unsafe(method(performTrayAction:))]
-        fn perform_tray_action(&self, _sender: Option<&AnyObject>) {
-            self.ivars().sink.send(TrayEvent::IconActivated {
-                kind: TrayIconEventKind::PrimaryClick,
-                position: None,
-                rect: None,
-            });
+    impl TrayTarget {
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, _event: &NSEvent) {
+            self.handle_click(TrayIconEventKind::PrimaryClick);
+        }
+
+        #[unsafe(method(rightMouseDown:))]
+        fn right_mouse_down(&self, _event: &NSEvent) {
+            self.handle_click(TrayIconEventKind::SecondaryClick);
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, _event: &NSEvent) {
+            self.set_button_highlight(false);
+        }
+
+        #[unsafe(method(rightMouseUp:))]
+        fn right_mouse_up(&self, _event: &NSEvent) {
+            self.set_button_highlight(false);
         }
     }
 );
 
-impl ButtonTarget {
-    fn new(mtm: MainThreadMarker, sink: Arc<dyn EventSink>) -> Retained<Self> {
-        let target = mtm.alloc().set_ivars(ButtonTargetIvars { sink });
-        unsafe { msg_send![super(target), init] }
+impl TrayTarget {
+    fn new(
+        mtm: MainThreadMarker,
+        status_item: &Retained<NSStatusItem>,
+        sink: Arc<dyn EventSink>,
+        activation_mode: ActivationMode,
+    ) -> Retained<Self> {
+        let frame = status_item
+            .button(mtm)
+            .map(|button| button.frame())
+            .unwrap_or_default();
+        let target = mtm.alloc().set_ivars(TrayTargetIvars {
+            sink,
+            status_item: status_item.retain(),
+            menu: RefCell::new(None),
+            activation_mode: std::cell::Cell::new(activation_mode),
+        });
+        let target: Retained<Self> = unsafe { msg_send![super(target), initWithFrame: frame] };
+        target.setWantsLayer(true);
+        target
+    }
+
+    fn update(
+        &self,
+        status_item: &NSStatusItem,
+        menu: Option<&Retained<NSMenu>>,
+        activation_mode: ActivationMode,
+        mtm: MainThreadMarker,
+    ) {
+        *self.ivars().menu.borrow_mut() = menu.map(|menu| menu.retain());
+        self.ivars().activation_mode.set(activation_mode);
+        if let Some(button) = status_item.button(mtm) {
+            self.setFrame(button.frame());
+        }
+    }
+
+    fn handle_click(&self, kind: TrayIconEventKind) {
+        self.ivars().sink.send(TrayEvent::IconActivated {
+            kind,
+            position: None,
+            rect: None,
+        });
+
+        if should_open_menu(self.ivars().activation_mode.get(), kind)
+            && self.ivars().menu.borrow().is_some()
+        {
+            self.perform_status_item_click();
+        } else {
+            self.set_button_highlight(true);
+        }
+    }
+
+    fn perform_status_item_click(&self) {
+        let mtm = MainThreadMarker::from(self);
+        if let Some(button) = self.ivars().status_item.button(mtm) {
+            unsafe {
+                button.performClick(None);
+            }
+        }
+    }
+
+    fn set_button_highlight(&self, highlighted: bool) {
+        let mtm = MainThreadMarker::from(self);
+        if let Some(button) = self.ivars().status_item.button(mtm) {
+            button.highlight(highlighted);
+        }
+    }
+}
+
+fn should_open_menu(activation_mode: ActivationMode, kind: TrayIconEventKind) -> bool {
+    match activation_mode {
+        ActivationMode::PlatformDefault | ActivationMode::MenuOnPrimaryClick => {
+            kind == TrayIconEventKind::PrimaryClick
+        },
+        ActivationMode::MenuOnSecondaryClick => kind == TrayIconEventKind::SecondaryClick,
     }
 }
 
@@ -341,5 +446,46 @@ impl TrayMenuItem {
             item.setTarget(Some(&item));
         }
         item
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_default_opens_menu_on_primary_click() {
+        assert!(should_open_menu(
+            ActivationMode::PlatformDefault,
+            TrayIconEventKind::PrimaryClick
+        ));
+        assert!(!should_open_menu(
+            ActivationMode::PlatformDefault,
+            TrayIconEventKind::SecondaryClick
+        ));
+    }
+
+    #[test]
+    fn menu_on_primary_click_opens_menu_on_primary_click_only() {
+        assert!(should_open_menu(
+            ActivationMode::MenuOnPrimaryClick,
+            TrayIconEventKind::PrimaryClick
+        ));
+        assert!(!should_open_menu(
+            ActivationMode::MenuOnPrimaryClick,
+            TrayIconEventKind::SecondaryClick
+        ));
+    }
+
+    #[test]
+    fn menu_on_secondary_click_opens_menu_on_secondary_click_only() {
+        assert!(!should_open_menu(
+            ActivationMode::MenuOnSecondaryClick,
+            TrayIconEventKind::PrimaryClick
+        ));
+        assert!(should_open_menu(
+            ActivationMode::MenuOnSecondaryClick,
+            TrayIconEventKind::SecondaryClick
+        ));
     }
 }
