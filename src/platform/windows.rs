@@ -565,8 +565,7 @@ fn create_hicon(icon: &Icon) -> Result<HICON, String> {
         bgra.push(rgba[3]);
     }
 
-    let mask_len = pixels.div_ceil(8);
-    let mask = vec![0u8; mask_len];
+    let mask = create_and_mask(icon.rgba(), icon.width(), icon.height())?;
 
     let hicon = unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::CreateIcon(
@@ -585,6 +584,48 @@ fn create_hicon(icon: &Icon) -> Result<HICON, String> {
     } else {
         Ok(hicon)
     }
+}
+
+fn create_and_mask(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let stride = and_mask_stride(width)?;
+    let height = usize::try_from(height).map_err(|_| "icon height overflow".to_string())?;
+    let width = usize::try_from(width).map_err(|_| "icon width overflow".to_string())?;
+    let mask_len = stride
+        .checked_mul(height)
+        .ok_or_else(|| "icon mask dimensions overflow".to_string())?;
+    let mut mask = vec![0u8; mask_len];
+
+    for y in 0..height {
+        for x in 0..width {
+            let pixel = y
+                .checked_mul(width)
+                .and_then(|row| row.checked_add(x))
+                .ok_or_else(|| "icon pixel offset overflow".to_string())?;
+            let alpha_offset = pixel
+                .checked_mul(4)
+                .and_then(|offset| offset.checked_add(3))
+                .ok_or_else(|| "icon rgba offset overflow".to_string())?;
+            let alpha = rgba
+                .get(alpha_offset)
+                .ok_or_else(|| "icon rgba buffer is shorter than dimensions".to_string())?;
+            if *alpha == 0 {
+                let byte = y * stride + x / 8;
+                let bit = 0x80 >> (x % 8);
+                mask[byte] |= bit;
+            }
+        }
+    }
+
+    Ok(mask)
+}
+
+fn and_mask_stride(width: u32) -> Result<usize, String> {
+    let width = usize::try_from(width).map_err(|_| "icon width overflow".to_string())?;
+    // CreateIcon expects a 1-bpp AND mask whose scanlines are padded to 32 bits.
+    width
+        .checked_add(31)
+        .map(|width| (width / 32) * 4)
+        .ok_or_else(|| "icon mask stride overflow".to_string())
 }
 
 fn cursor_position() -> Option<crate::PhysicalPosition> {
@@ -614,4 +655,46 @@ fn copy_wide_truncated(dst: &mut [u16], value: &str) {
         *slot = code_unit;
     }
     dst[max] = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn and_mask_stride_is_padded_to_32_bits() {
+        assert_eq!(and_mask_stride(16).unwrap(), 4);
+        assert_eq!(and_mask_stride(17).unwrap(), 4);
+        assert_eq!(and_mask_stride(32).unwrap(), 4);
+        assert_eq!(and_mask_stride(33).unwrap(), 8);
+    }
+
+    #[test]
+    fn and_mask_len_uses_padded_stride_per_row() {
+        assert_eq!(
+            create_and_mask(&vec![255; 16 * 16 * 4], 16, 16)
+                .unwrap()
+                .len(),
+            64
+        );
+        assert_eq!(create_and_mask(&vec![255; 17 * 4], 17, 1).unwrap().len(), 4);
+        assert_eq!(create_and_mask(&vec![255; 32 * 4], 32, 1).unwrap().len(), 4);
+        assert_eq!(create_and_mask(&vec![255; 33 * 4], 33, 1).unwrap().len(), 8);
+    }
+
+    #[test]
+    fn and_mask_sets_bits_for_fully_transparent_pixels() {
+        let mut rgba = vec![255; 9 * 2 * 4];
+        rgba[3] = 0;
+        rgba[8 * 4 + 3] = 0;
+        rgba[(9 + 1) * 4 + 3] = 0;
+        rgba[(9 + 2) * 4 + 3] = 128;
+
+        let mask = create_and_mask(&rgba, 9, 2).unwrap();
+
+        assert_eq!(mask.len(), 8);
+        assert_eq!(mask[0], 0x80);
+        assert_eq!(mask[1], 0x80);
+        assert_eq!(mask[4], 0x40);
+    }
 }
