@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 
@@ -9,6 +10,7 @@ use crate::{TrayError, TrayResult};
 pub(crate) struct BackendCommandSender {
     sender: Sender<BackendCommand>,
     wake: Arc<dyn Fn() + Send + Sync>,
+    closed: Arc<AtomicBool>,
 }
 
 pub(crate) struct BackendRuntime {
@@ -18,10 +20,24 @@ pub(crate) struct BackendRuntime {
 
 impl BackendCommandSender {
     pub(crate) fn new(sender: Sender<BackendCommand>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
-        Self { sender, wake }
+        Self {
+            sender,
+            wake,
+            closed: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub(crate) fn send(&self, command: BackendCommand) -> TrayResult<()> {
+        let close = matches!(command, BackendCommand::Close);
+
+        if close {
+            if self.closed.swap(true, Ordering::AcqRel) {
+                return Ok(());
+            }
+        } else if self.closed.load(Ordering::Acquire) {
+            return Err(TrayError::CommandQueueClosed);
+        }
+
         self.sender
             .send(command)
             .map_err(|_| TrayError::CommandQueueClosed)?;
@@ -72,7 +88,7 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::{Menu, MenuNode, TrayEvent, TrayState};
+    use crate::{Menu, MenuNode, TrayError, TrayEvent, TrayState};
 
     #[test]
     fn redundant_state_update_is_not_queued() {
@@ -135,5 +151,61 @@ mod tests {
 
         assert_eq!(runtime.shutdown(), Ok(()));
         assert_eq!(runtime.shutdown(), Ok(()));
+    }
+
+    #[test]
+    fn close_is_shared_and_idempotent_across_clones() {
+        let (tx, rx) = mpsc::channel();
+        let wake_count = Arc::new(Mutex::new(0usize));
+        let wake_count_for_sender = wake_count.clone();
+        let sender = BackendCommandSender::new(
+            tx,
+            Arc::new(move || {
+                *wake_count_for_sender.lock().unwrap() += 1;
+            }),
+        );
+        let clone = sender.clone();
+
+        clone.send(BackendCommand::Close).unwrap();
+        sender.send(BackendCommand::Close).unwrap();
+
+        assert_eq!(rx.try_recv(), Ok(BackendCommand::Close));
+        assert!(rx.try_recv().is_err());
+        assert_eq!(*wake_count.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn set_state_after_close_is_rejected_across_clones() {
+        let (tx, rx) = mpsc::channel();
+        let sender = BackendCommandSender::new(tx, Arc::new(|| {}));
+        let clone = sender.clone();
+
+        sender.send(BackendCommand::Close).unwrap();
+
+        assert_eq!(
+            clone.send(BackendCommand::SetState(TrayState::new())),
+            Err(TrayError::CommandQueueClosed)
+        );
+        assert_eq!(rx.try_recv(), Ok(BackendCommand::Close));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn tray_handle_set_state_after_close_is_rejected_without_updating_last_state() {
+        let (tx, rx) = mpsc::channel();
+        let sender = BackendCommandSender::new(tx, Arc::new(|| {}));
+        let last_state = Arc::new(Mutex::new(Some(TrayState::new())));
+        let handle = crate::TrayHandle::new(sender.clone(), last_state.clone());
+        let next_state = TrayState::new().with_menu(Menu::new([MenuNode::item("quit", "Quit")]));
+
+        sender.send(BackendCommand::Close).unwrap();
+
+        assert_eq!(
+            handle.set_state(next_state),
+            Err(TrayError::CommandQueueClosed)
+        );
+        assert_eq!(*last_state.lock().unwrap(), Some(TrayState::new()));
+        assert_eq!(rx.try_recv(), Ok(BackendCommand::Close));
+        assert!(rx.try_recv().is_err());
     }
 }
