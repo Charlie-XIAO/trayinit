@@ -373,16 +373,25 @@ impl StatusNotifierItemIface {
     }
 }
 
+fn has_active_menu(state: &TrayState) -> bool {
+    state
+        .menu
+        .as_ref()
+        .is_some_and(|menu| !menu.nodes().is_empty())
+}
+
 #[zbus::interface(name = "org.kde.StatusNotifierItem")]
 impl StatusNotifierItemIface {
     fn context_menu(&self, _x: i32, _y: i32) -> zbus::fdo::Result<()> {
-        Ok(())
+        Err(zbus::fdo::Error::UnknownMethod(
+            "ContextMenu is not supported; use DBusMenu".into(),
+        ))
     }
 
     async fn activate(&self, x: i32, y: i32) -> zbus::fdo::Result<()> {
         let (has_menu, sink) = {
             let service = self.service.lock().await;
-            (service.state.menu.is_some(), service.sink.clone())
+            (has_active_menu(&service.state), service.sink.clone())
         };
 
         if has_menu {
@@ -455,7 +464,7 @@ impl StatusNotifierItemIface {
     #[zbus(property)]
     async fn item_is_menu(&self) -> zbus::fdo::Result<bool> {
         let service = self.service.lock().await;
-        Ok(service.state.menu.is_some())
+        Ok(has_active_menu(&service.state))
     }
 
     #[zbus(property)]
@@ -700,5 +709,37 @@ fn insert_str(
 ) {
     if let Some(value) = value {
         map.insert(name.into(), OwnedValue::from(Str::from_static(value)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Menu, MenuNode, TrayState};
+
+    #[test]
+    fn absent_menu_is_not_active_menu() {
+        assert!(!has_active_menu(&TrayState::new()));
+    }
+
+    #[test]
+    fn empty_menu_is_not_active_menu() {
+        let state = TrayState::new().with_menu(Menu::empty());
+
+        assert!(!has_active_menu(&state));
+    }
+
+    #[test]
+    fn actionable_menu_is_active_menu() {
+        let state = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
+
+        assert!(has_active_menu(&state));
+    }
+
+    #[test]
+    fn separator_only_menu_is_active_menu() {
+        let state = TrayState::new().with_menu(Menu::new([MenuNode::separator()]));
+
+        assert!(has_active_menu(&state));
     }
 }
