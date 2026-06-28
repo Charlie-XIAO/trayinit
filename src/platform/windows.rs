@@ -34,9 +34,13 @@ const TRAY_UID: u32 = 1;
 const WM_TRAYICON: u32 = WM_APP + 1;
 const WM_BACKEND_COMMAND: u32 = WM_APP + 2;
 
+#[derive(Debug, Default)]
+pub struct PlatformOptions;
+
 pub(crate) fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
+    _options: PlatformOptions,
 ) -> TrayResult<BackendRuntime> {
     let (command_tx, command_rx) = mpsc::channel();
     let (init_tx, init_rx) = mpsc::channel();

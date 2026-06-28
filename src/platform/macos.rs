@@ -18,15 +18,19 @@ use crate::{
     TrayResult, TrayState,
 };
 
+#[derive(Debug, Default)]
+pub struct PlatformOptions;
+
 pub(crate) fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
+    _options: PlatformOptions,
 ) -> TrayResult<BackendRuntime> {
     let mtm = MainThreadMarker::new().ok_or(TrayError::NotMainThread)?;
     // Standalone tray-only processes may not have initialized AppKit before
     // constructing the tray. Do this without changing app activation policy.
     let _ = NSApplication::sharedApplication(mtm);
-    let backend = Rc::new(RefCell::new(MacosBackend::new(initial_state, sink, mtm)?));
+    let backend = Rc::new(RefCell::new(Backend::new(initial_state, sink, mtm)?));
     let dispatch_backend = backend.clone();
 
     let sender = BackendCommandSender::new(Rc::new(move |command| {
@@ -37,7 +41,7 @@ pub(crate) fn spawn(
     Ok(BackendRuntime::new(sender))
 }
 
-struct MacosBackend {
+struct Backend {
     state: TrayState,
     sink: Arc<dyn EventSink>,
     status_item: Option<Retained<NSStatusItem>>,
@@ -45,7 +49,7 @@ struct MacosBackend {
     menu: Option<Retained<NSMenu>>,
 }
 
-impl MacosBackend {
+impl Backend {
     fn new(state: TrayState, sink: Arc<dyn EventSink>, mtm: MainThreadMarker) -> TrayResult<Self> {
         let mut backend = Self {
             state,

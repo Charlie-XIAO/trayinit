@@ -5,7 +5,7 @@ use crate::backend::BackendCommand;
 use crate::{TrayError, TrayResult};
 
 #[derive(Clone)]
-pub(crate) struct BackendCommandSender {
+pub struct BackendCommandSender {
     inner: Rc<DirectCommandSender>,
 }
 
@@ -14,12 +14,12 @@ struct DirectCommandSender {
     dispatch: Rc<dyn Fn(BackendCommand) -> TrayResult<()>>,
 }
 
-pub(crate) struct BackendRuntime {
+pub struct BackendRuntime {
     sender: Option<BackendCommandSender>,
 }
 
 impl BackendCommandSender {
-    pub(crate) fn new(dispatch: Rc<dyn Fn(BackendCommand) -> TrayResult<()>>) -> Self {
+    pub fn new(dispatch: Rc<dyn Fn(BackendCommand) -> TrayResult<()>>) -> Self {
         Self {
             inner: Rc::new(DirectCommandSender {
                 closed: Cell::new(false),
@@ -28,7 +28,7 @@ impl BackendCommandSender {
         }
     }
 
-    pub(crate) fn send(&self, command: BackendCommand) -> TrayResult<()> {
+    pub fn send(&self, command: BackendCommand) -> TrayResult<()> {
         self.inner.send(command)
     }
 }
@@ -54,20 +54,20 @@ impl DirectCommandSender {
 }
 
 impl BackendRuntime {
-    pub(crate) fn new(sender: BackendCommandSender) -> Self {
+    pub fn new(sender: BackendCommandSender) -> Self {
         Self {
             sender: Some(sender),
         }
     }
 
-    pub(crate) fn sender(&self) -> BackendCommandSender {
+    pub fn sender(&self) -> BackendCommandSender {
         self.sender
             .as_ref()
             .expect("backend sender requested after shutdown")
             .clone()
     }
 
-    pub(crate) fn shutdown(&mut self) -> TrayResult<()> {
+    pub fn shutdown(&mut self) -> TrayResult<()> {
         let Some(sender) = self.sender.as_ref() else {
             return Ok(());
         };

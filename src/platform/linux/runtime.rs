@@ -4,13 +4,13 @@ use std::time::Duration;
 use crate::TrayResult;
 
 #[cfg(feature = "linux-zbus-async-io")]
-pub(crate) type Mutex<T> = async_lock::Mutex<T>;
+pub type Mutex<T> = async_lock::Mutex<T>;
 
 #[cfg(feature = "linux-zbus-tokio")]
-pub(crate) type Mutex<T> = tokio::sync::Mutex<T>;
+pub type Mutex<T> = tokio::sync::Mutex<T>;
 
 #[cfg(feature = "linux-zbus-async-io")]
-pub(crate) fn run<F>(future: F) -> TrayResult<()>
+pub fn run<F>(future: F) -> TrayResult<()>
 where
     F: Future<Output = ()>,
 {
@@ -19,7 +19,7 @@ where
 }
 
 #[cfg(feature = "linux-zbus-tokio")]
-pub(crate) fn run<F>(future: F) -> TrayResult<()>
+pub fn run<F>(future: F) -> TrayResult<()>
 where
     F: Future<Output = ()>,
 {
@@ -34,11 +34,11 @@ where
 }
 
 #[cfg(feature = "linux-zbus-async-io")]
-pub(crate) async fn sleep(duration: Duration) {
+pub async fn sleep(duration: Duration) {
     async_io::Timer::after(duration).await;
 }
 
 #[cfg(feature = "linux-zbus-tokio")]
-pub(crate) async fn sleep(duration: Duration) {
+pub async fn sleep(duration: Duration) {
     tokio::time::sleep(duration).await;
 }

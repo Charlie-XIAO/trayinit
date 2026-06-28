@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::{InvalidState, Menu, MenuItemId, MenuNode, TrayResult, TrayState};
 
-pub(crate) fn validate_state(state: &TrayState) -> TrayResult<()> {
+pub fn validate_state(state: &TrayState) -> TrayResult<()> {
     if let Some(icon) = &state.icon {
         crate::icon::validate_rgba(icon.rgba(), icon.width(), icon.height())
             .map_err(InvalidState::InvalidIcon)?;
@@ -15,7 +15,7 @@ pub(crate) fn validate_state(state: &TrayState) -> TrayResult<()> {
     Ok(())
 }
 
-pub(crate) fn validate_menu(menu: &Menu) -> TrayResult<()> {
+pub fn validate_menu(menu: &Menu) -> TrayResult<()> {
     let mut seen = HashSet::new();
     validate_nodes(menu.nodes(), &mut seen)
 }

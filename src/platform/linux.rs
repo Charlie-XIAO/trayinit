@@ -11,3 +11,4 @@ mod runtime;
 mod service;
 
 pub(crate) use service::spawn;
+pub use service::{PlatformOptions, StartupPolicy};

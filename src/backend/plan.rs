@@ -3,25 +3,25 @@ use std::collections::HashMap;
 use super::validate_menu;
 use crate::{CheckItem, Menu, MenuItem, MenuItemId, MenuNode, Submenu, TrayResult};
 
-pub(crate) type BackendMenuId = u32;
-pub(crate) type BackendCommandId = u32;
+pub type BackendMenuId = u32;
+pub type BackendCommandId = u32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct MenuPlan {
-    pub(crate) nodes: Vec<PlannedNode>,
-    pub(crate) command_map: HashMap<BackendCommandId, MenuItemId>,
+pub struct MenuPlan {
+    pub nodes: Vec<PlannedNode>,
+    pub command_map: HashMap<BackendCommandId, MenuItemId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PlannedNode {
-    pub(crate) backend_id: BackendMenuId,
-    pub(crate) explicit_id: Option<MenuItemId>,
-    pub(crate) kind: PlannedNodeKind,
-    pub(crate) children: Vec<PlannedNode>,
+pub struct PlannedNode {
+    pub backend_id: BackendMenuId,
+    pub explicit_id: Option<MenuItemId>,
+    pub kind: PlannedNodeKind,
+    pub children: Vec<PlannedNode>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PlannedNodeKind {
+pub enum PlannedNodeKind {
     Item(PlannedItem),
     Check(PlannedCheckItem),
     Submenu(PlannedSubmenu),
@@ -29,24 +29,24 @@ pub(crate) enum PlannedNodeKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PlannedItem {
-    pub(crate) command_id: BackendCommandId,
-    pub(crate) label: String,
-    pub(crate) enabled: bool,
+pub struct PlannedItem {
+    pub command_id: BackendCommandId,
+    pub label: String,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PlannedCheckItem {
-    pub(crate) command_id: BackendCommandId,
-    pub(crate) label: String,
-    pub(crate) checked: bool,
-    pub(crate) enabled: bool,
+pub struct PlannedCheckItem {
+    pub command_id: BackendCommandId,
+    pub label: String,
+    pub checked: bool,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PlannedSubmenu {
-    pub(crate) label: String,
-    pub(crate) enabled: bool,
+pub struct PlannedSubmenu {
+    pub label: String,
+    pub enabled: bool,
 }
 
 #[derive(Default)]
@@ -56,7 +56,7 @@ struct PlanBuilder {
     command_map: HashMap<BackendCommandId, MenuItemId>,
 }
 
-pub(crate) fn plan_menu(menu: &Menu) -> TrayResult<MenuPlan> {
+pub fn plan_menu(menu: &Menu) -> TrayResult<MenuPlan> {
     validate_menu(menu)?;
     let mut builder = PlanBuilder::default();
     let nodes = builder.plan_nodes(menu.nodes());

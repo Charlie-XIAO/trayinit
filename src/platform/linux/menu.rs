@@ -11,47 +11,47 @@ use std::collections::HashMap;
 use crate::backend::plan::{PlannedNode, PlannedNodeKind, plan_menu};
 use crate::{Menu, MenuItemId, TrayResult};
 
-pub(crate) const ROOT_ID: i32 = 0;
+pub const ROOT_ID: i32 = 0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct LinuxMenu {
-    pub(crate) revision: u32,
-    root: LinuxMenuNode,
+pub struct MenuTree {
+    pub revision: u32,
+    root: MenuNode,
     action_map: HashMap<i32, MenuItemId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct LinuxMenuNode {
-    pub(crate) id: i32,
-    pub(crate) properties: LinuxMenuProperties,
-    pub(crate) children: Vec<LinuxMenuNode>,
+pub struct MenuNode {
+    pub id: i32,
+    pub properties: MenuProperties,
+    pub children: Vec<MenuNode>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct LinuxMenuProperties {
-    pub(crate) item_type: Option<&'static str>,
-    pub(crate) label: Option<String>,
-    pub(crate) enabled: Option<bool>,
-    pub(crate) visible: Option<bool>,
-    pub(crate) toggle_type: Option<&'static str>,
-    pub(crate) toggle_state: Option<i32>,
-    pub(crate) children_display: Option<&'static str>,
+pub struct MenuProperties {
+    pub item_type: Option<&'static str>,
+    pub label: Option<String>,
+    pub enabled: Option<bool>,
+    pub visible: Option<bool>,
+    pub toggle_type: Option<&'static str>,
+    pub toggle_state: Option<i32>,
+    pub children_display: Option<&'static str>,
 }
 
-impl LinuxMenu {
-    pub(crate) fn empty(revision: u32) -> Self {
+impl MenuTree {
+    pub fn empty(revision: u32) -> Self {
         Self {
             revision,
-            root: LinuxMenuNode {
+            root: MenuNode {
                 id: ROOT_ID,
-                properties: LinuxMenuProperties::default(),
+                properties: MenuProperties::default(),
                 children: Vec::new(),
             },
             action_map: HashMap::new(),
         }
     }
 
-    pub(crate) fn from_menu(menu: Option<&Menu>, revision: u32) -> TrayResult<Self> {
+    pub fn from_menu(menu: Option<&Menu>, revision: u32) -> TrayResult<Self> {
         let Some(menu) = menu else {
             return Ok(Self::empty(revision));
         };
@@ -63,9 +63,9 @@ impl LinuxMenu {
             .iter()
             .map(|node| convert_node(node, &mut action_map))
             .collect();
-        let mut root = LinuxMenuNode {
+        let mut root = MenuNode {
             id: ROOT_ID,
-            properties: LinuxMenuProperties::default(),
+            properties: MenuProperties::default(),
             children,
         };
         if !root.children.is_empty() {
@@ -79,16 +79,16 @@ impl LinuxMenu {
         })
     }
 
-    pub(crate) fn action_for(&self, id: i32) -> Option<MenuItemId> {
+    pub fn action_for(&self, id: i32) -> Option<MenuItemId> {
         self.action_map.get(&id).cloned()
     }
 
-    pub(crate) fn layout(
+    pub fn layout(
         &self,
         parent_id: i32,
         recursion_depth: i32,
         property_names: &[String],
-    ) -> Option<LinuxMenuNode> {
+    ) -> Option<MenuNode> {
         let node = self.find_node(parent_id)?;
         Some(filter_node(
             node,
@@ -101,22 +101,18 @@ impl LinuxMenu {
         ))
     }
 
-    pub(crate) fn properties(
-        &self,
-        id: i32,
-        property_names: &[String],
-    ) -> Option<LinuxMenuProperties> {
+    pub fn properties(&self, id: i32, property_names: &[String]) -> Option<MenuProperties> {
         self.find_node(id)
             .map(|node| node.properties.filtered(property_names))
     }
 
-    fn find_node(&self, id: i32) -> Option<&LinuxMenuNode> {
+    fn find_node(&self, id: i32) -> Option<&MenuNode> {
         find_node(&self.root, id)
     }
 }
 
-impl LinuxMenuProperties {
-    pub(crate) fn is_empty(&self) -> bool {
+impl MenuProperties {
+    pub fn is_empty(&self) -> bool {
         self.item_type.is_none()
             && self.label.is_none()
             && self.enabled.is_none()
@@ -126,7 +122,7 @@ impl LinuxMenuProperties {
             && self.children_display.is_none()
     }
 
-    pub(crate) fn filtered(&self, property_names: &[String]) -> Self {
+    pub fn filtered(&self, property_names: &[String]) -> Self {
         if property_names.is_empty() {
             return self.clone();
         }
@@ -146,7 +142,7 @@ impl LinuxMenuProperties {
     }
 }
 
-pub(crate) fn icon_rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
+pub fn icon_rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
     let mut argb = Vec::with_capacity(rgba.len());
     for pixel in rgba.chunks_exact(4) {
         argb.extend_from_slice(&[pixel[3], pixel[0], pixel[1], pixel[2]]);
@@ -154,7 +150,7 @@ pub(crate) fn icon_rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
     argb
 }
 
-fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -> LinuxMenuNode {
+fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -> MenuNode {
     let id = i32::try_from(node.backend_id).expect("menu id overflow");
     let mut children: Vec<_> = node
         .children
@@ -170,7 +166,7 @@ fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -
                     id.clone(),
                 );
             }
-            LinuxMenuProperties {
+            MenuProperties {
                 item_type: Some("standard"),
                 label: Some(item.label.clone()),
                 enabled: Some(item.enabled),
@@ -185,7 +181,7 @@ fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -
                     id.clone(),
                 );
             }
-            LinuxMenuProperties {
+            MenuProperties {
                 item_type: Some("standard"),
                 label: Some(item.label.clone()),
                 enabled: Some(item.enabled),
@@ -195,14 +191,14 @@ fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -
                 ..Default::default()
             }
         },
-        PlannedNodeKind::Submenu(submenu) => LinuxMenuProperties {
+        PlannedNodeKind::Submenu(submenu) => MenuProperties {
             item_type: Some("standard"),
             label: Some(submenu.label.clone()),
             enabled: Some(submenu.enabled),
             visible: Some(true),
             ..Default::default()
         },
-        PlannedNodeKind::Separator => LinuxMenuProperties {
+        PlannedNodeKind::Separator => MenuProperties {
             item_type: Some("separator"),
             visible: Some(true),
             ..Default::default()
@@ -213,7 +209,7 @@ fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -
         properties.children_display = Some("submenu");
     }
 
-    LinuxMenuNode {
+    MenuNode {
         id,
         properties,
         children: std::mem::take(&mut children),
@@ -221,10 +217,10 @@ fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -
 }
 
 fn filter_node(
-    node: &LinuxMenuNode,
+    node: &MenuNode,
     recursion_depth: Option<usize>,
     property_names: &[String],
-) -> LinuxMenuNode {
+) -> MenuNode {
     let children = if recursion_depth == Some(0) {
         Vec::new()
     } else {
@@ -240,14 +236,14 @@ fn filter_node(
             .collect()
     };
 
-    LinuxMenuNode {
+    MenuNode {
         id: node.id,
         properties: node.properties.filtered(property_names),
         children,
     }
 }
 
-fn find_node(node: &LinuxMenuNode, id: i32) -> Option<&LinuxMenuNode> {
+fn find_node(node: &MenuNode, id: i32) -> Option<&MenuNode> {
     if node.id == id {
         return Some(node);
     }
@@ -274,7 +270,7 @@ mod tests {
             MenuNode::separator(),
             MenuNode::submenu("More", [MenuNode::item("about", "About")]),
         ]);
-        let menu = LinuxMenu::from_menu(Some(&menu), 7).unwrap();
+        let menu = MenuTree::from_menu(Some(&menu), 7).unwrap();
         let root = menu.layout(ROOT_ID, -1, &[]).unwrap();
 
         assert_eq!(menu.revision, 7);
@@ -296,7 +292,7 @@ mod tests {
             MenuNode::submenu_with_id("submenu", "More", [MenuNode::item("about", "About")]),
             MenuNode::separator(),
         ]);
-        let menu = LinuxMenu::from_menu(Some(&menu), 1).unwrap();
+        let menu = MenuTree::from_menu(Some(&menu), 1).unwrap();
 
         assert_eq!(menu.action_map.len(), 1);
         assert!(menu.action_map.values().any(|id| id.as_str() == "about"));
@@ -306,12 +302,12 @@ mod tests {
     #[test]
     fn filters_properties() {
         let menu = Menu::new([MenuNode::item("open", "Open")]);
-        let menu = LinuxMenu::from_menu(Some(&menu), 1).unwrap();
+        let menu = MenuTree::from_menu(Some(&menu), 1).unwrap();
         let props = menu.properties(1, &[String::from("label")]).unwrap();
 
         assert_eq!(props.label.as_deref(), Some("Open"));
         assert!(props.enabled.is_none());
         assert!(!props.is_empty());
-        assert!(LinuxMenuProperties::default().is_empty());
+        assert!(MenuProperties::default().is_empty());
     }
 }

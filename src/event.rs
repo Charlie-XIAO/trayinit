@@ -45,7 +45,12 @@ pub enum TrayIconEventKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrayStatus {
+    /// The platform tray service is registered and a host/watcher is present.
     Available,
+    /// Linux StatusNotifierWatcher is not currently available.
+    WatcherUnavailable(String),
+    /// Linux watcher exists, but no StatusNotifierHost is currently registered.
+    NoHost(String),
     TemporarilyUnavailable(String),
     BackendError(String),
 }

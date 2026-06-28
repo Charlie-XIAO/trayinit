@@ -10,7 +10,7 @@ use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedValue, Str, Value};
 
-use super::menu::{LinuxMenu, LinuxMenuNode, LinuxMenuProperties, ROOT_ID, icon_rgba_to_argb};
+use super::menu::{MenuNode, MenuProperties, MenuTree, ROOT_ID, icon_rgba_to_argb};
 use super::runtime;
 use crate::backend::{BackendCommand, BackendRuntime};
 use crate::{
@@ -23,16 +23,41 @@ const WATCHER_NAME: &str = "org.kde.StatusNotifierWatcher";
 
 static INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
-pub(crate) fn spawn(
+#[derive(Debug)]
+pub struct PlatformOptions {
+    pub own_dbus_name: bool,
+    pub startup_policy: StartupPolicy,
+    pub id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartupPolicy {
+    Soft,
+    RequireWatcher,
+    RequireHost,
+}
+
+impl Default for PlatformOptions {
+    fn default() -> Self {
+        Self {
+            own_dbus_name: true,
+            startup_policy: StartupPolicy::Soft,
+            id: None,
+        }
+    }
+}
+
+pub fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
+    options: PlatformOptions,
 ) -> TrayResult<BackendRuntime> {
     let (command_tx, command_rx) = mpsc::channel();
     let (init_tx, init_rx) = mpsc::channel();
 
     let join = thread::Builder::new()
         .name("trayinit-linux-backend".into())
-        .spawn(move || backend_thread(initial_state, sink, command_rx, init_tx))
+        .spawn(move || backend_thread(initial_state, sink, options, command_rx, init_tx))
         .map_err(|err| TrayError::ThreadInit(err.to_string()))?;
 
     init_rx.recv().map_err(|_| {
@@ -45,12 +70,14 @@ pub(crate) fn spawn(
 fn backend_thread(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
+    options: PlatformOptions,
     command_rx: Receiver<BackendCommand>,
     init_tx: mpsc::Sender<TrayResult<()>>,
 ) {
     let result = runtime::run(run_backend(
         initial_state,
         sink,
+        options,
         command_rx,
         init_tx.clone(),
     ));
@@ -62,20 +89,18 @@ fn backend_thread(
 async fn run_backend(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
+    options: PlatformOptions,
     command_rx: Receiver<BackendCommand>,
     init_tx: mpsc::Sender<TrayResult<()>>,
 ) {
-    let identity = format!(
+    let generated_id = format!(
         "org.kde.StatusNotifierItem-{}-{}",
         std::process::id(),
         INSTANCE_COUNTER.fetch_add(1, Ordering::AcqRel)
     );
+    let id = options.id.clone().unwrap_or_else(|| generated_id.clone());
 
-    let service = Arc::new(runtime::Mutex::new(LinuxService::new(
-        identity.clone(),
-        initial_state,
-        sink,
-    )));
+    let service = Arc::new(runtime::Mutex::new(Service::new(id, initial_state, sink)));
 
     let conn = match zbus::connection::Builder::session()
         .map_err(|err| TrayError::BackendUnavailable(err.to_string()))
@@ -102,14 +127,49 @@ async fn run_backend(
         },
     };
 
-    if let Err(err) = conn.request_name(identity.as_str()).await {
-        let _ = init_tx.send(Err(TrayError::BackendUnavailable(err.to_string())));
-        return;
+    let registration_name = if options.own_dbus_name {
+        if let Err(err) = conn.request_name(generated_id.as_str()).await {
+            let _ = init_tx.send(Err(TrayError::BackendUnavailable(err.to_string())));
+            return;
+        }
+        generated_id
+    } else {
+        match conn.unique_name() {
+            Some(name) => name.to_string(),
+            None => {
+                let _ = init_tx.send(Err(TrayError::BackendUnavailable(
+                    "session bus did not assign a unique name".into(),
+                )));
+                return;
+            },
+        }
+    };
+
+    match options.startup_policy {
+        StartupPolicy::Soft => {
+            let _ = init_tx.send(Ok(()));
+            update_watcher_status(&conn, &registration_name, &service).await;
+        },
+        StartupPolicy::RequireWatcher | StartupPolicy::RequireHost => {
+            match check_watcher(&conn, &registration_name).await {
+                Ok(availability) => {
+                    let startup_result = startup_result(options.startup_policy, &availability);
+                    if let Err(err) = startup_result {
+                        let _ = init_tx.send(Err(err));
+                        let _ = conn.close().await;
+                        return;
+                    }
+                    let _ = init_tx.send(Ok(()));
+                    emit_status(&service, availability.into_status()).await;
+                },
+                Err(err) => {
+                    let _ = init_tx.send(Err(err));
+                    let _ = conn.close().await;
+                    return;
+                },
+            }
+        },
     }
-
-    let _ = init_tx.send(Ok(()));
-
-    register_with_watcher(&conn, &identity, &service).await;
 
     let mut watcher_changes = match zbus::fdo::DBusProxy::new(&conn).await {
         Ok(proxy) => proxy
@@ -142,11 +202,11 @@ async fn run_backend(
                         && let Ok(args) = event.args()
                     {
                         if args.new_owner.as_ref().is_some() {
-                            register_with_watcher(&conn, &identity, &service).await;
+                            update_watcher_status(&conn, &registration_name, &service).await;
                         } else {
                             emit_status(
                                 &service,
-                                TrayStatus::TemporarilyUnavailable(
+                                TrayStatus::WatcherUnavailable(
                                     "StatusNotifierWatcher disappeared".into(),
                                 ),
                             )
@@ -172,7 +232,7 @@ enum CommandOutcome {
 async fn drain_commands(
     command_rx: &Receiver<BackendCommand>,
     conn: &Connection,
-    service: &Arc<runtime::Mutex<LinuxService>>,
+    service: &Arc<runtime::Mutex<Service>>,
 ) -> CommandOutcome {
     loop {
         match command_rx.try_recv() {
@@ -188,49 +248,103 @@ async fn drain_commands(
     }
 }
 
-async fn register_with_watcher(
-    conn: &Connection,
-    identity: &str,
-    service: &Arc<runtime::Mutex<LinuxService>>,
-) {
-    let proxy = match StatusNotifierWatcherProxy::new(conn).await {
-        Ok(proxy) => proxy,
-        Err(err) => {
-            emit_status(
-                service,
-                TrayStatus::BackendError(format!("failed to create watcher proxy: {err}")),
-            )
-            .await;
-            return;
-        },
-    };
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Availability {
+    Available,
+    WatcherUnavailable(String),
+    NoHost(String),
+}
 
-    match proxy.register_status_notifier_item(identity).await {
-        Ok(()) => emit_status(service, TrayStatus::Available).await,
-        Err(err) => {
-            let fdo_err: zbus::fdo::Error = err.into();
-            if matches!(fdo_err, zbus::fdo::Error::ServiceUnknown(_)) {
-                emit_status(
-                    service,
-                    TrayStatus::TemporarilyUnavailable(
-                        "StatusNotifierWatcher is not available".into(),
-                    ),
-                )
-                .await;
-            } else {
-                emit_status(
-                    service,
-                    TrayStatus::BackendError(format!(
-                        "failed to register StatusNotifierItem: {fdo_err}"
-                    )),
-                )
-                .await;
-            }
+impl Availability {
+    fn into_status(self) -> TrayStatus {
+        match self {
+            Self::Available => TrayStatus::Available,
+            Self::WatcherUnavailable(message) => TrayStatus::WatcherUnavailable(message),
+            Self::NoHost(message) => TrayStatus::NoHost(message),
+        }
+    }
+}
+
+fn startup_result(policy: StartupPolicy, availability: &Availability) -> TrayResult<()> {
+    match (policy, availability) {
+        (StartupPolicy::Soft, _) => Ok(()),
+        (StartupPolicy::RequireWatcher, Availability::WatcherUnavailable(message)) => {
+            Err(TrayError::BackendUnavailable(message.clone()))
+        },
+        (StartupPolicy::RequireWatcher, _) => Ok(()),
+        (StartupPolicy::RequireHost, Availability::Available) => Ok(()),
+        (StartupPolicy::RequireHost, Availability::WatcherUnavailable(message))
+        | (StartupPolicy::RequireHost, Availability::NoHost(message)) => {
+            Err(TrayError::BackendUnavailable(message.clone()))
         },
     }
 }
 
-async fn emit_status(service: &Arc<runtime::Mutex<LinuxService>>, status: TrayStatus) {
+async fn update_watcher_status(
+    conn: &Connection,
+    registration_name: &str,
+    service: &Arc<runtime::Mutex<Service>>,
+) {
+    match check_watcher(conn, registration_name).await {
+        Ok(availability) => emit_status(service, availability.into_status()).await,
+        Err(err) => emit_status(service, TrayStatus::BackendError(err.to_string())).await,
+    }
+}
+
+async fn check_watcher(conn: &Connection, registration_name: &str) -> TrayResult<Availability> {
+    let proxy = match StatusNotifierWatcherProxy::new(conn).await {
+        Ok(proxy) => proxy,
+        Err(err) => {
+            let fdo_err: zbus::fdo::Error = err.into();
+            if matches!(fdo_err, zbus::fdo::Error::ServiceUnknown(_)) {
+                return Ok(Availability::WatcherUnavailable(
+                    "StatusNotifierWatcher is not available".into(),
+                ));
+            }
+            return Err(TrayError::BackendUnavailable(format!(
+                "failed to create watcher proxy: {fdo_err}"
+            )));
+        },
+    };
+
+    match proxy.register_status_notifier_item(registration_name).await {
+        Ok(()) => {},
+        Err(err) => {
+            let fdo_err: zbus::fdo::Error = err.into();
+            if matches!(fdo_err, zbus::fdo::Error::ServiceUnknown(_)) {
+                return Ok(Availability::WatcherUnavailable(
+                    "StatusNotifierWatcher is not available".into(),
+                ));
+            } else {
+                return Err(TrayError::BackendUnavailable(format!(
+                    "failed to register StatusNotifierItem: {fdo_err}"
+                )));
+            }
+        },
+    }
+
+    match proxy.is_status_notifier_host_registered().await {
+        Ok(true) => Ok(Availability::Available),
+        Ok(false) => Ok(Availability::NoHost(
+            "no StatusNotifierHost is registered".into(),
+        )),
+        Err(err) => Err(watcher_error(
+            err,
+            "failed to query StatusNotifierHost registration",
+        )),
+    }
+}
+
+fn watcher_error(err: zbus::Error, context: &str) -> TrayError {
+    let fdo_err: zbus::fdo::Error = err.into();
+    if matches!(fdo_err, zbus::fdo::Error::ServiceUnknown(_)) {
+        TrayError::BackendUnavailable("StatusNotifierWatcher is not available".into())
+    } else {
+        TrayError::BackendUnavailable(format!("{context}: {fdo_err}"))
+    }
+}
+
+async fn emit_status(service: &Arc<runtime::Mutex<Service>>, status: TrayStatus) {
     let sink = {
         let service = service.lock().await;
         service.sink.clone()
@@ -240,7 +354,7 @@ async fn emit_status(service: &Arc<runtime::Mutex<LinuxService>>, status: TraySt
 
 async fn apply_state(
     conn: &Connection,
-    service: &Arc<runtime::Mutex<LinuxService>>,
+    service: &Arc<runtime::Mutex<Service>>,
     state: TrayState,
 ) -> zbus::Result<()> {
     let changes = {
@@ -281,7 +395,7 @@ async fn apply_state(
 }
 
 #[derive(Clone, Debug)]
-struct LinuxStateChanges {
+struct StateChanges {
     title: bool,
     icon: bool,
     tooltip: bool,
@@ -290,18 +404,18 @@ struct LinuxStateChanges {
     revision: u32,
 }
 
-struct LinuxService {
+struct Service {
     identity: String,
     state: TrayState,
-    menu: LinuxMenu,
+    menu: MenuTree,
     sink: Arc<dyn EventSink>,
     revision: u32,
 }
 
-impl LinuxService {
+impl Service {
     fn new(identity: String, state: TrayState, sink: Arc<dyn EventSink>) -> Self {
         let menu =
-            LinuxMenu::from_menu(state.menu.as_ref(), 0).unwrap_or_else(|_| LinuxMenu::empty(0));
+            MenuTree::from_menu(state.menu.as_ref(), 0).unwrap_or_else(|_| MenuTree::empty(0));
         Self {
             identity,
             state,
@@ -311,17 +425,17 @@ impl LinuxService {
         }
     }
 
-    fn set_state(&mut self, state: TrayState) -> LinuxStateChanges {
+    fn set_state(&mut self, state: TrayState) -> StateChanges {
         let old = self.state.clone();
         let menu_changed = old.menu != state.menu;
         if menu_changed {
             self.revision = self.revision.wrapping_add(1);
-            self.menu = LinuxMenu::from_menu(state.menu.as_ref(), self.revision)
-                .unwrap_or_else(|_| LinuxMenu::empty(self.revision));
+            self.menu = MenuTree::from_menu(state.menu.as_ref(), self.revision)
+                .unwrap_or_else(|_| MenuTree::empty(self.revision));
         }
         self.state = state;
 
-        LinuxStateChanges {
+        StateChanges {
             title: old.title != self.state.title,
             icon: old.icon != self.state.icon,
             tooltip: old.tooltip != self.state.tooltip,
@@ -364,11 +478,11 @@ impl LinuxService {
 }
 
 struct StatusNotifierItemIface {
-    service: Arc<runtime::Mutex<LinuxService>>,
+    service: Arc<runtime::Mutex<Service>>,
 }
 
 impl StatusNotifierItemIface {
-    fn new(service: Arc<runtime::Mutex<LinuxService>>) -> Self {
+    fn new(service: Arc<runtime::Mutex<Service>>) -> Self {
         Self { service }
     }
 }
@@ -523,11 +637,11 @@ impl StatusNotifierItemIface {
 }
 
 struct DbusMenuIface {
-    service: Arc<runtime::Mutex<LinuxService>>,
+    service: Arc<runtime::Mutex<Service>>,
 }
 
 impl DbusMenuIface {
-    fn new(service: Arc<runtime::Mutex<LinuxService>>) -> Self {
+    fn new(service: Arc<runtime::Mutex<Service>>) -> Self {
         Self { service }
     }
 }
@@ -661,9 +775,12 @@ type DbusMenuLayout = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
 )]
 trait StatusNotifierWatcher {
     async fn register_status_notifier_item(&self, service: &str) -> zbus::Result<()>;
+
+    #[zbus(property)]
+    fn is_status_notifier_host_registered(&self) -> zbus::Result<bool>;
 }
 
-fn layout_to_dbus(node: LinuxMenuNode) -> DbusMenuLayout {
+fn layout_to_dbus(node: MenuNode) -> DbusMenuLayout {
     (
         node.id,
         properties_to_dbus(node.properties),
@@ -678,7 +795,7 @@ fn layout_to_dbus(node: LinuxMenuNode) -> DbusMenuLayout {
     )
 }
 
-fn properties_to_dbus(properties: LinuxMenuProperties) -> HashMap<String, OwnedValue> {
+fn properties_to_dbus(properties: MenuProperties) -> HashMap<String, OwnedValue> {
     if properties.is_empty() {
         return HashMap::new();
     }
@@ -715,7 +832,7 @@ fn insert_str(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Menu, MenuNode, TrayState};
+    use crate::{Menu, MenuNode, TrayState, channel};
 
     #[test]
     fn absent_menu_is_not_active_menu() {
@@ -741,5 +858,84 @@ mod tests {
         let state = TrayState::new().with_menu(Menu::new([MenuNode::separator()]));
 
         assert!(has_active_menu(&state));
+    }
+
+    #[test]
+    fn default_linux_options_soft_start_and_own_name() {
+        let options = PlatformOptions::default();
+
+        assert!(options.own_dbus_name);
+        assert_eq!(options.startup_policy, StartupPolicy::Soft);
+        assert_eq!(options.id, None);
+    }
+
+    #[test]
+    fn availability_maps_to_status() {
+        assert_eq!(Availability::Available.into_status(), TrayStatus::Available);
+        assert_eq!(
+            Availability::WatcherUnavailable("offline".into()).into_status(),
+            TrayStatus::WatcherUnavailable("offline".into())
+        );
+        assert_eq!(
+            Availability::NoHost("no host".into()).into_status(),
+            TrayStatus::NoHost("no host".into())
+        );
+    }
+
+    #[test]
+    fn soft_start_accepts_all_availability_states() {
+        assert!(startup_result(StartupPolicy::Soft, &Availability::Available).is_ok());
+        assert!(
+            startup_result(
+                StartupPolicy::Soft,
+                &Availability::WatcherUnavailable("offline".into())
+            )
+            .is_ok()
+        );
+        assert!(
+            startup_result(StartupPolicy::Soft, &Availability::NoHost("no host".into())).is_ok()
+        );
+    }
+
+    #[test]
+    fn require_watcher_accepts_registered_no_host() {
+        assert!(
+            startup_result(
+                StartupPolicy::RequireWatcher,
+                &Availability::NoHost("no host".into())
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn require_watcher_rejects_missing_watcher() {
+        assert!(matches!(
+            startup_result(
+                StartupPolicy::RequireWatcher,
+                &Availability::WatcherUnavailable("offline".into())
+            ),
+            Err(TrayError::BackendUnavailable(message)) if message == "offline"
+        ));
+    }
+
+    #[test]
+    fn require_host_only_accepts_available() {
+        assert!(startup_result(StartupPolicy::RequireHost, &Availability::Available).is_ok());
+        assert!(matches!(
+            startup_result(
+                StartupPolicy::RequireHost,
+                &Availability::NoHost("no host".into())
+            ),
+            Err(TrayError::BackendUnavailable(message)) if message == "no host"
+        ));
+    }
+
+    #[test]
+    fn linux_id_option_controls_sni_id_property() {
+        let (sink, _events) = channel();
+        let service = Service::new("custom-id".into(), TrayState::new(), Arc::new(sink));
+
+        assert_eq!(service.identity, "custom-id");
     }
 }

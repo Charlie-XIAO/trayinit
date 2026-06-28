@@ -1,12 +1,12 @@
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-pub(crate) mod plan;
+pub mod plan;
 
 mod command;
 mod runtime;
 mod validate;
 
-pub(crate) use command::BackendCommand;
-pub(crate) use runtime::{BackendCommandSender, BackendRuntime};
+pub use command::BackendCommand;
+pub use runtime::{BackendCommandSender, BackendRuntime};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-pub(crate) use validate::validate_menu;
-pub(crate) use validate::validate_state;
+pub use validate::validate_menu;
+pub use validate::validate_state;

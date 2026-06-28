@@ -7,19 +7,19 @@ use crate::backend::BackendCommand;
 use crate::{TrayError, TrayResult};
 
 #[derive(Clone)]
-pub(crate) struct BackendCommandSender {
+pub struct BackendCommandSender {
     sender: Sender<BackendCommand>,
     wake: Arc<dyn Fn() + Send + Sync>,
     closed: Arc<AtomicBool>,
 }
 
-pub(crate) struct BackendRuntime {
+pub struct BackendRuntime {
     sender: BackendCommandSender,
     join: Option<JoinHandle<()>>,
 }
 
 impl BackendCommandSender {
-    pub(crate) fn new(sender: Sender<BackendCommand>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
+    pub fn new(sender: Sender<BackendCommand>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         Self {
             sender,
             wake,
@@ -27,7 +27,7 @@ impl BackendCommandSender {
         }
     }
 
-    pub(crate) fn send(&self, command: BackendCommand) -> TrayResult<()> {
+    pub fn send(&self, command: BackendCommand) -> TrayResult<()> {
         let close = matches!(command, BackendCommand::Close);
 
         if close {
@@ -47,7 +47,7 @@ impl BackendCommandSender {
 }
 
 impl BackendRuntime {
-    pub(crate) fn new(
+    pub fn new(
         sender: Sender<BackendCommand>,
         wake: Arc<dyn Fn() + Send + Sync>,
         join: JoinHandle<()>,
@@ -58,11 +58,11 @@ impl BackendRuntime {
         }
     }
 
-    pub(crate) fn sender(&self) -> BackendCommandSender {
+    pub fn sender(&self) -> BackendCommandSender {
         self.sender.clone()
     }
 
-    pub(crate) fn shutdown(&mut self) -> TrayResult<()> {
+    pub fn shutdown(&mut self) -> TrayResult<()> {
         let Some(join) = self.join.take() else {
             return Ok(());
         };

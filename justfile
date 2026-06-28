@@ -19,7 +19,7 @@ test *flags:
     cargo nextest run {{ flags }}
 
 doc *flags:
-    cargo +nightly doc --no-deps --document-private-items -Z rustdoc-map {{ flags }}
+    cargo +nightly doc --no-deps -Z rustdoc-map {{ flags }}
 
 ci: fmt lint test
 
