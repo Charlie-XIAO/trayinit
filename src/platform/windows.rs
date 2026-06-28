@@ -255,21 +255,20 @@ impl ThreadState {
             ActivationMode::MenuOnPrimaryClick => kind == TrayIconEventKind::PrimaryClick,
         };
 
-        if show_menu
-            && !self.native.hmenu.is_null()
-            && let Some(item_id) = self.native.track_menu(self.hwnd)
-        {
-            let event = TrayEvent::MenuItemActivated { item_id };
-            self.sink.send(event);
-            return;
-        }
-
         let event = TrayEvent::IconActivated {
             kind,
             position: cursor_position(),
             rect: None,
         };
         self.sink.send(event);
+
+        if show_menu
+            && !self.native.hmenu.is_null()
+            && let Some(item_id) = self.native.track_menu(self.hwnd)
+        {
+            let event = TrayEvent::MenuItemActivated { item_id };
+            self.sink.send(event);
+        }
     }
 }
 
