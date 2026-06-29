@@ -166,43 +166,31 @@ async fn run_backend(
         }
     };
 
-    match options.startup_policy {
-        StartupPolicy::Soft => {
-            let _ = init_tx.send(Ok(()));
-            update_watcher_status(&conn, &registration_name, &service).await;
-        },
-        StartupPolicy::RequireWatcher | StartupPolicy::RequireHost => {
-            match check_watcher(&conn, &registration_name).await {
-                Ok(availability) => {
-                    let startup_result = startup_result(options.startup_policy, &availability);
-                    if let Err(err) = startup_result {
-                        let _ = init_tx.send(Err(err));
-                        let _ = conn.close().await;
-                        return;
-                    }
-                    let _ = init_tx.send(Ok(()));
-                    emit_status(&service, availability.into_status()).await;
-                },
-                Err(err) => {
-                    let _ = init_tx.send(Err(err));
-                    let _ = conn.close().await;
-                    return;
-                },
-            }
-        },
+    let mut watcher_proxy = StatusNotifierWatcherProxy::new(&conn).await.ok();
+    let mut host_registered = None;
+    let mut host_unregistered = None;
+
+    if let Some(proxy) = &watcher_proxy {
+        host_registered = proxy.receive_status_notifier_host_registered().await.ok();
+        host_unregistered = proxy.receive_status_notifier_host_unregistered().await.ok();
     }
 
-    let watcher_proxy = StatusNotifierWatcherProxy::new(&conn).await.ok();
-    let mut host_registered = if let Some(proxy) = &watcher_proxy {
-        proxy.receive_status_notifier_host_registered().await.ok()
+    let initial_status = if let Some(proxy) = &watcher_proxy {
+        match register_with_watcher(proxy, &registration_name).await {
+            Ok(()) => query_host_status(proxy).await,
+            Err(err) => TrayStatus::WatcherUnavailable(err.to_string()),
+        }
     } else {
-        None
+        TrayStatus::WatcherUnavailable("StatusNotifierWatcher not found".into())
     };
-    let mut host_unregistered = if let Some(proxy) = &watcher_proxy {
-        proxy.receive_status_notifier_host_unregistered().await.ok()
-    } else {
-        None
-    };
+
+    if let Err(err) = startup_result(options.startup_policy, &initial_status) {
+        let _ = init_tx.send(Err(err));
+        let _ = conn.close().await;
+        return;
+    }
+    let _ = init_tx.send(Ok(()));
+    emit_status(&service, initial_status).await;
 
     let mut watcher_changes = match zbus::fdo::DBusProxy::new(&conn).await {
         Ok(proxy) => proxy
@@ -256,39 +244,56 @@ async fn run_backend(
         pin_mut!(watcher_next, host_reg_next, host_unreg_next, timeout);
 
         select! {
-            event = watcher_next => {
-                if let Some(event) = event
-                    && let Ok(args) = event.args()
-                {
-                    if args.new_owner.as_ref().is_some() {
-                        update_watcher_status(&conn, &registration_name, &service).await;
-                        if let Some(proxy) = &watcher_proxy {
-                            host_registered = proxy.receive_status_notifier_host_registered().await.ok();
-                            host_unregistered = proxy.receive_status_notifier_host_unregistered().await.ok();
+            event = watcher_next => match event {
+                Some(event) => {
+                    if let Ok(args) = event.args() {
+                        if args.new_owner.as_ref().is_some() {
+                            if let Ok(proxy) = StatusNotifierWatcherProxy::new(&conn).await {
+                                host_registered = proxy.receive_status_notifier_host_registered().await.ok();
+                                host_unregistered = proxy.receive_status_notifier_host_unregistered().await.ok();
+                                match register_with_watcher(&proxy, &registration_name).await {
+                                    Ok(()) => {
+                                        let status = query_host_status(&proxy).await;
+                                        emit_status(&service, status).await;
+                                    },
+                                    Err(err) => {
+                                        emit_status(&service, TrayStatus::WatcherUnavailable(err.to_string())).await;
+                                    },
+                                }
+                                watcher_proxy = Some(proxy);
+                            } else {
+                                watcher_proxy = None;
+                                host_registered = None;
+                                host_unregistered = None;
+                            }
+                        } else {
+                            emit_status(&service, TrayStatus::WatcherUnavailable("StatusNotifierWatcher disappeared".into())).await;
+                            watcher_proxy = None;
+                            host_registered = None;
+                            host_unregistered = None;
                         }
-                    } else {
-                        emit_status(
-                            &service,
-                            TrayStatus::WatcherUnavailable(
-                                "StatusNotifierWatcher disappeared".into(),
-                            ),
-                        )
-                        .await;
-                        host_registered = None;
-                        host_unregistered = None;
                     }
-                }
-            }
-            reg = host_reg_next => {
-                if reg.is_some() {
-                    update_watcher_status(&conn, &registration_name, &service).await;
-                }
-            }
-            unreg = host_unreg_next => {
-                if unreg.is_some() {
-                    update_watcher_status(&conn, &registration_name, &service).await;
-                }
-            }
+                },
+                None => watcher_changes = None,
+            },
+            reg = host_reg_next => match reg {
+                Some(_) => {
+                    if let Some(proxy) = &watcher_proxy {
+                        let status = query_host_status(proxy).await;
+                        emit_status(&service, status).await;
+                    }
+                },
+                None => host_registered = None,
+            },
+            unreg = host_unreg_next => match unreg {
+                Some(_) => {
+                    if let Some(proxy) = &watcher_proxy {
+                        let status = query_host_status(proxy).await;
+                        emit_status(&service, status).await;
+                    }
+                },
+                None => host_unregistered = None,
+            },
             _ = timeout => {}
         }
     }
@@ -320,99 +325,43 @@ async fn drain_commands(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Availability {
-    Available,
-    WatcherUnavailable(String),
-    NoHost(String),
-}
-
-impl Availability {
-    fn into_status(self) -> TrayStatus {
-        match self {
-            Self::Available => TrayStatus::Available,
-            Self::WatcherUnavailable(message) => TrayStatus::WatcherUnavailable(message),
-            Self::NoHost(message) => TrayStatus::NoHost(message),
-        }
-    }
-}
-
-fn startup_result(policy: StartupPolicy, availability: &Availability) -> TrayResult<()> {
-    match (policy, availability) {
+fn startup_result(policy: StartupPolicy, status: &TrayStatus) -> TrayResult<()> {
+    match (policy, status) {
         (StartupPolicy::Soft, _) => Ok(()),
-        (StartupPolicy::RequireWatcher, Availability::WatcherUnavailable(message)) => {
+        (StartupPolicy::RequireWatcher, TrayStatus::WatcherUnavailable(message)) => {
             Err(TrayError::BackendUnavailable(message.clone()))
         },
         (StartupPolicy::RequireWatcher, _) => Ok(()),
-        (StartupPolicy::RequireHost, Availability::Available) => Ok(()),
-        (StartupPolicy::RequireHost, Availability::WatcherUnavailable(message))
-        | (StartupPolicy::RequireHost, Availability::NoHost(message)) => {
-            Err(TrayError::BackendUnavailable(message.clone()))
-        },
+        (StartupPolicy::RequireHost, TrayStatus::Available) => Ok(()),
+        (
+            StartupPolicy::RequireHost,
+            TrayStatus::WatcherUnavailable(message)
+            | TrayStatus::NoHost(message)
+            | TrayStatus::TemporarilyUnavailable(message)
+            | TrayStatus::BackendError(message),
+        ) => Err(TrayError::BackendUnavailable(message.clone())),
     }
 }
 
-async fn update_watcher_status(
-    conn: &Connection,
+async fn register_with_watcher(
+    proxy: &StatusNotifierWatcherProxy<'_>,
     registration_name: &str,
-    service: &Arc<runtime::Mutex<Service>>,
-) {
-    match check_watcher(conn, registration_name).await {
-        Ok(availability) => emit_status(service, availability.into_status()).await,
-        Err(err) => emit_status(service, TrayStatus::BackendError(err.to_string())).await,
-    }
-}
-
-async fn check_watcher(conn: &Connection, registration_name: &str) -> TrayResult<Availability> {
-    let proxy = match StatusNotifierWatcherProxy::new(conn).await {
-        Ok(proxy) => proxy,
-        Err(err) => {
-            let fdo_err: zbus::fdo::Error = err.into();
-            if matches!(fdo_err, zbus::fdo::Error::ServiceUnknown(_)) {
-                return Ok(Availability::WatcherUnavailable(
-                    "StatusNotifierWatcher is not available".into(),
-                ));
-            }
-            return Err(TrayError::BackendUnavailable(format!(
-                "failed to create watcher proxy: {fdo_err}"
-            )));
-        },
-    };
-
+) -> TrayResult<()> {
     match proxy.register_status_notifier_item(registration_name).await {
-        Ok(()) => {},
-        Err(err) => {
-            let fdo_err: zbus::fdo::Error = err.into();
-            if matches!(fdo_err, zbus::fdo::Error::ServiceUnknown(_)) {
-                return Ok(Availability::WatcherUnavailable(
-                    "StatusNotifierWatcher is not available".into(),
-                ));
-            } else {
-                return Err(TrayError::BackendUnavailable(format!(
-                    "failed to register StatusNotifierItem: {fdo_err}"
-                )));
-            }
-        },
-    }
-
-    match proxy.is_status_notifier_host_registered().await {
-        Ok(true) => Ok(Availability::Available),
-        Ok(false) => Ok(Availability::NoHost(
-            "no StatusNotifierHost is registered".into(),
-        )),
-        Err(err) => Err(watcher_error(
-            err,
-            "failed to query StatusNotifierHost registration",
-        )),
+        Ok(()) => Ok(()),
+        Err(err) => Err(TrayError::BackendUnavailable(format!(
+            "failed to register StatusNotifierWatcher: {err}"
+        ))),
     }
 }
 
-fn watcher_error(err: zbus::Error, context: &str) -> TrayError {
-    let fdo_err: zbus::fdo::Error = err.into();
-    if matches!(fdo_err, zbus::fdo::Error::ServiceUnknown(_)) {
-        TrayError::BackendUnavailable("StatusNotifierWatcher is not available".into())
-    } else {
-        TrayError::BackendUnavailable(format!("{context}: {fdo_err}"))
+async fn query_host_status(proxy: &StatusNotifierWatcherProxy<'_>) -> TrayStatus {
+    match proxy.is_status_notifier_host_registered().await {
+        Ok(true) => TrayStatus::Available,
+        Ok(false) => TrayStatus::NoHost("no StatusNotifierHost registered".into()),
+        Err(err) => TrayStatus::BackendError(format!(
+            "failed to query StatusNotifierWatcher registration: {err}"
+        )),
     }
 }
 
@@ -613,10 +562,10 @@ impl Service {
 
             match menu_change {
                 MenuChange::LayoutUpdated => {
-                    let max_id = self.menu.max_id();
-                    let mut next_base = (self.menu_id_base + max_id) & 0x7FFFFFFF;
-                    if next_base == 0 {
-                        next_base = 1;
+                    let old_max = self.menu.max_id();
+                    let mut next_base = old_max;
+                    if next_base <= 0 || next_base >= i32::MAX - 10000 {
+                        next_base = 0;
                     }
                     self.menu_id_base = next_base;
 
@@ -1063,31 +1012,16 @@ mod tests {
     }
 
     #[test]
-    fn availability_maps_to_status() {
-        assert_eq!(Availability::Available.into_status(), TrayStatus::Available);
-        assert_eq!(
-            Availability::WatcherUnavailable("offline".into()).into_status(),
-            TrayStatus::WatcherUnavailable("offline".into())
-        );
-        assert_eq!(
-            Availability::NoHost("no host".into()).into_status(),
-            TrayStatus::NoHost("no host".into())
-        );
-    }
-
-    #[test]
     fn soft_start_accepts_all_availability_states() {
-        assert!(startup_result(StartupPolicy::Soft, &Availability::Available).is_ok());
+        assert!(startup_result(StartupPolicy::Soft, &TrayStatus::Available).is_ok());
         assert!(
             startup_result(
                 StartupPolicy::Soft,
-                &Availability::WatcherUnavailable("offline".into())
+                &TrayStatus::WatcherUnavailable("offline".into())
             )
             .is_ok()
         );
-        assert!(
-            startup_result(StartupPolicy::Soft, &Availability::NoHost("no host".into())).is_ok()
-        );
+        assert!(startup_result(StartupPolicy::Soft, &TrayStatus::NoHost("no host".into())).is_ok());
     }
 
     #[test]
@@ -1095,7 +1029,7 @@ mod tests {
         assert!(
             startup_result(
                 StartupPolicy::RequireWatcher,
-                &Availability::NoHost("no host".into())
+                &TrayStatus::NoHost("no host".into())
             )
             .is_ok()
         );
@@ -1106,7 +1040,7 @@ mod tests {
         assert!(matches!(
             startup_result(
                 StartupPolicy::RequireWatcher,
-                &Availability::WatcherUnavailable("offline".into())
+                &TrayStatus::WatcherUnavailable("offline".into())
             ),
             Err(TrayError::BackendUnavailable(message)) if message == "offline"
         ));
@@ -1114,11 +1048,11 @@ mod tests {
 
     #[test]
     fn require_host_only_accepts_available() {
-        assert!(startup_result(StartupPolicy::RequireHost, &Availability::Available).is_ok());
+        assert!(startup_result(StartupPolicy::RequireHost, &TrayStatus::Available).is_ok());
         assert!(matches!(
             startup_result(
                 StartupPolicy::RequireHost,
-                &Availability::NoHost("no host".into())
+                &TrayStatus::NoHost("no host".into())
             ),
             Err(TrayError::BackendUnavailable(message)) if message == "no host"
         ));

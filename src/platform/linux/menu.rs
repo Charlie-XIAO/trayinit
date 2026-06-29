@@ -64,7 +64,7 @@ impl MenuTree {
             return Ok(Self::empty(revision));
         };
 
-        let plan = plan_menu(menu, u32::try_from(base_id).expect("base id overflow"))?;
+        let plan = plan_menu(menu, base_id as u32)?;
         let mut action_map = HashMap::new();
         let children = plan
             .nodes
@@ -163,7 +163,7 @@ pub fn icon_rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
 }
 
 fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -> MenuNode {
-    let id = i32::try_from(node.backend_id).expect("menu id overflow");
+    let id = node.backend_id as i32;
     let mut children: Vec<_> = node
         .children
         .iter()
@@ -172,11 +172,8 @@ fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -
 
     let mut properties = match &node.kind {
         PlannedNodeKind::Item(item) => {
-            if let Some(id) = &node.explicit_id {
-                action_map.insert(
-                    i32::try_from(node.backend_id).expect("menu id overflow"),
-                    id.clone(),
-                );
+            if let Some(explicit_id) = &node.explicit_id {
+                action_map.insert(id, explicit_id.clone());
             }
             MenuProperties {
                 item_type: Some("standard"),
@@ -187,11 +184,8 @@ fn convert_node(node: &PlannedNode, action_map: &mut HashMap<i32, MenuItemId>) -
             }
         },
         PlannedNodeKind::Check(item) => {
-            if let Some(id) = &node.explicit_id {
-                action_map.insert(
-                    i32::try_from(node.backend_id).expect("menu id overflow"),
-                    id.clone(),
-                );
+            if let Some(explicit_id) = &node.explicit_id {
+                action_map.insert(id, explicit_id.clone());
             }
             MenuProperties {
                 item_type: Some("standard"),
