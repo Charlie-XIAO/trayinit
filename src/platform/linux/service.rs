@@ -249,15 +249,21 @@ async fn run_backend(
                     if let Ok(args) = event.args() {
                         if args.new_owner.as_ref().is_some() {
                             if let Ok(proxy) = StatusNotifierWatcherProxy::new(&conn).await {
-                                host_registered = proxy.receive_status_notifier_host_registered().await.ok();
-                                host_unregistered = proxy.receive_status_notifier_host_unregistered().await.ok();
+                                host_registered =
+                                    proxy.receive_status_notifier_host_registered().await.ok();
+                                host_unregistered =
+                                    proxy.receive_status_notifier_host_unregistered().await.ok();
                                 match register_with_watcher(&proxy, &registration_name).await {
                                     Ok(()) => {
                                         let status = query_host_status(&proxy).await;
                                         emit_status(&service, status).await;
                                     },
                                     Err(err) => {
-                                        emit_status(&service, TrayStatus::WatcherUnavailable(err.to_string())).await;
+                                        emit_status(
+                                            &service,
+                                            TrayStatus::WatcherUnavailable(err.to_string()),
+                                        )
+                                        .await;
                                     },
                                 }
                                 watcher_proxy = Some(proxy);
@@ -267,7 +273,13 @@ async fn run_backend(
                                 host_unregistered = None;
                             }
                         } else {
-                            emit_status(&service, TrayStatus::WatcherUnavailable("StatusNotifierWatcher disappeared".into())).await;
+                            emit_status(
+                                &service,
+                                TrayStatus::WatcherUnavailable(
+                                    "StatusNotifierWatcher disappeared".into(),
+                                ),
+                            )
+                            .await;
                             watcher_proxy = None;
                             host_registered = None;
                             host_unregistered = None;
