@@ -15,7 +15,7 @@ use objc2_foundation::{MainThreadMarker, NSData, NSSize, NSString};
 use crate::backend::{BackendCommand, BackendCommandSender, BackendRuntime};
 use crate::{
     ActivationMode, EventSink, Icon, Menu, MenuNode, TrayError, TrayEvent, TrayIconEventKind,
-    TrayResult, TrayState,
+    TrayId, TrayResult, TrayState,
 };
 
 #[derive(Debug, Default)]
@@ -25,12 +25,18 @@ pub(crate) fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
     _options: PlatformOptions,
+    tray_id: TrayId,
 ) -> TrayResult<BackendRuntime> {
     let mtm = MainThreadMarker::new().ok_or(TrayError::NotMainThread)?;
     // Standalone tray-only processes may not have initialized AppKit before
     // constructing the tray. Do this without changing app activation policy.
     let _ = NSApplication::sharedApplication(mtm);
-    let backend = Rc::new(RefCell::new(Backend::new(initial_state, sink, mtm)?));
+    let backend = Rc::new(RefCell::new(Backend::new(
+        initial_state,
+        sink,
+        tray_id,
+        mtm,
+    )?));
     let dispatch_backend = backend.clone();
 
     let sender = BackendCommandSender::new(Rc::new(move |command| {
@@ -44,16 +50,23 @@ pub(crate) fn spawn(
 struct Backend {
     state: TrayState,
     sink: Arc<dyn EventSink>,
+    tray_id: TrayId,
     status_item: Option<Retained<NSStatusItem>>,
     tray_target: Option<Retained<TrayTarget>>,
     menu: Option<Retained<NSMenu>>,
 }
 
 impl Backend {
-    fn new(state: TrayState, sink: Arc<dyn EventSink>, mtm: MainThreadMarker) -> TrayResult<Self> {
+    fn new(
+        state: TrayState,
+        sink: Arc<dyn EventSink>,
+        tray_id: TrayId,
+        mtm: MainThreadMarker,
+    ) -> TrayResult<Self> {
         let mut backend = Self {
             state,
             sink,
+            tray_id,
             status_item: None,
             tray_target: None,
             menu: None,
@@ -105,7 +118,7 @@ impl Backend {
         };
 
         if let Some(menu) = &self.state.menu {
-            let ns_menu = build_menu(menu, self.sink.clone(), mtm)?;
+            let ns_menu = build_menu(menu, self.sink.clone(), self.tray_id.clone(), mtm)?;
             ns_menu.setAutoenablesItems(false);
             status_item.setMenu(Some(&ns_menu));
             self.menu = Some(ns_menu);
@@ -133,6 +146,7 @@ impl Backend {
                     mtm,
                     status_item,
                     self.sink.clone(),
+                    self.tray_id.clone(),
                     self.state.activation_mode,
                 );
                 button.addSubview(&target);
@@ -211,13 +225,14 @@ fn set_status_tooltip(
 fn build_menu(
     menu: &Menu,
     sink: Arc<dyn EventSink>,
+    tray_id: TrayId,
     mtm: MainThreadMarker,
 ) -> TrayResult<Retained<NSMenu>> {
     let ns_menu = NSMenu::new(mtm);
     ns_menu.setAutoenablesItems(false);
 
     for node in menu.nodes() {
-        let item = build_menu_node(node, sink.clone(), mtm)?;
+        let item = build_menu_node(node, sink.clone(), tray_id.clone(), mtm)?;
         ns_menu.addItem(&item);
     }
 
@@ -227,16 +242,17 @@ fn build_menu(
 fn build_menu_node(
     node: &MenuNode,
     sink: Arc<dyn EventSink>,
+    tray_id: TrayId,
     mtm: MainThreadMarker,
 ) -> TrayResult<Retained<NSMenuItem>> {
     match node {
         MenuNode::Item(item) => {
-            let ns_item = TrayMenuItem::new(mtm, &item.label, item.id.clone(), sink);
+            let ns_item = TrayMenuItem::new(mtm, &item.label, tray_id, item.id.clone(), sink);
             ns_item.setEnabled(item.enabled);
             Ok(Retained::into_super(ns_item))
         },
         MenuNode::Check(item) => {
-            let ns_item = TrayMenuItem::new(mtm, &item.label, item.id.clone(), sink);
+            let ns_item = TrayMenuItem::new(mtm, &item.label, tray_id, item.id.clone(), sink);
             ns_item.setEnabled(item.enabled);
             ns_item.setState(if item.checked {
                 NSControlStateValueOn
@@ -260,7 +276,7 @@ fn build_menu_node(
             ns_submenu.setAutoenablesItems(false);
             ns_item.setEnabled(submenu.enabled);
             for child in &submenu.children {
-                let child = build_menu_node(child, sink.clone(), mtm)?;
+                let child = build_menu_node(child, sink.clone(), tray_id.clone(), mtm)?;
                 ns_submenu.addItem(&child);
             }
             ns_item.setSubmenu(Some(&ns_submenu));
@@ -293,6 +309,7 @@ fn ns_image_from_icon(icon: &Icon) -> TrayResult<Retained<NSImage>> {
 
 struct TrayTargetIvars {
     sink: Arc<dyn EventSink>,
+    tray_id: TrayId,
     status_item: Retained<NSStatusItem>,
     menu: RefCell<Option<Retained<NSMenu>>>,
     activation_mode: std::cell::Cell<ActivationMode>,
@@ -333,6 +350,7 @@ impl TrayTarget {
         mtm: MainThreadMarker,
         status_item: &Retained<NSStatusItem>,
         sink: Arc<dyn EventSink>,
+        tray_id: TrayId,
         activation_mode: ActivationMode,
     ) -> Retained<Self> {
         let frame = status_item
@@ -341,6 +359,7 @@ impl TrayTarget {
             .unwrap_or_default();
         let target = mtm.alloc().set_ivars(TrayTargetIvars {
             sink,
+            tray_id,
             status_item: status_item.retain(),
             menu: RefCell::new(None),
             activation_mode: std::cell::Cell::new(activation_mode),
@@ -366,6 +385,7 @@ impl TrayTarget {
 
     fn handle_click(&self, kind: TrayIconEventKind) {
         self.ivars().sink.send(TrayEvent::IconActivated {
+            tray_id: self.ivars().tray_id.clone(),
             kind,
             position: None,
             rect: None,
@@ -407,6 +427,7 @@ fn should_open_menu(activation_mode: ActivationMode, kind: TrayIconEventKind) ->
 }
 
 struct TrayMenuItemIvars {
+    tray_id: TrayId,
     item_id: crate::MenuItemId,
     sink: Arc<dyn EventSink>,
 }
@@ -422,6 +443,7 @@ define_class!(
         #[unsafe(method(performTrayAction:))]
         fn perform_tray_action(&self, _sender: Option<&AnyObject>) {
             self.ivars().sink.send(TrayEvent::MenuItemActivated {
+                tray_id: self.ivars().tray_id.clone(),
                 item_id: self.ivars().item_id.clone(),
             });
         }
@@ -432,12 +454,17 @@ impl TrayMenuItem {
     fn new(
         mtm: MainThreadMarker,
         label: &str,
+        tray_id: TrayId,
         item_id: crate::MenuItemId,
         sink: Arc<dyn EventSink>,
     ) -> Retained<Self> {
         let title = NSString::from_str(label);
         let key_equivalent = NSString::new();
-        let target = mtm.alloc().set_ivars(TrayMenuItemIvars { item_id, sink });
+        let target = mtm.alloc().set_ivars(TrayMenuItemIvars {
+            tray_id,
+            item_id,
+            sink,
+        });
         let item: Retained<Self> = unsafe {
             msg_send![
                 super(target),

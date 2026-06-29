@@ -9,7 +9,9 @@ pub mod platform;
 mod tray;
 
 pub use error::{InvalidState, TrayError, TrayResult};
-pub use event::{ChannelEventSink, EventSink, TrayEvent, TrayIconEventKind, TrayStatus, channel};
+pub use event::{
+    ChannelEventSink, EventSink, TrayEvent, TrayIconEventKind, TrayId, TrayStatus, channel,
+};
 pub use icon::{Icon, IconError};
 pub use menu::{CheckItem, Menu, MenuItem, MenuItemId, MenuNode, Submenu};
 pub use model::{ActivationMode, PhysicalPosition, PhysicalRect, TrayState};

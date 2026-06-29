@@ -1,15 +1,21 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::backend::{self, BackendCommand, BackendCommandSender, BackendRuntime};
-use crate::{EventSink, TrayError, TrayOptions, TrayResult, TrayState};
+use crate::platform::PlatformOptions;
+use crate::{EventSink, TrayError, TrayId, TrayOptions, TrayResult, TrayState};
+
+static TRAY_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 pub struct Tray {
+    id: TrayId,
     backend: BackendRuntime,
     last_state: Arc<Mutex<Option<TrayState>>>,
 }
 
 #[derive(Clone)]
 pub struct TrayHandle {
+    id: TrayId,
     sender: BackendCommandSender,
     last_state: Arc<Mutex<Option<TrayState>>>,
 }
@@ -31,19 +37,31 @@ impl Tray {
         S: EventSink,
     {
         backend::validate_state(&initial_state)?;
+        let (id, platform_options) = resolve_options(options)?;
+
         let backend = crate::platform::spawn(
             initial_state.clone(),
             Arc::new(sink),
-            options.into_platform(),
+            platform_options,
+            id.clone(),
         )?;
         Ok(Self {
+            id,
             backend,
             last_state: Arc::new(Mutex::new(Some(initial_state))),
         })
     }
 
     pub fn handle(&self) -> TrayHandle {
-        TrayHandle::new(self.backend.sender(), self.last_state.clone())
+        TrayHandle::new(
+            self.id.clone(),
+            self.backend.sender(),
+            self.last_state.clone(),
+        )
+    }
+
+    pub fn id(&self) -> &TrayId {
+        &self.id
     }
 
     pub fn set_state(&self, state: TrayState) -> TrayResult<()> {
@@ -63,10 +81,19 @@ impl Drop for Tray {
 
 impl TrayHandle {
     pub(crate) fn new(
+        id: TrayId,
         sender: BackendCommandSender,
         last_state: Arc<Mutex<Option<TrayState>>>,
     ) -> Self {
-        Self { sender, last_state }
+        Self {
+            id,
+            sender,
+            last_state,
+        }
+    }
+
+    pub fn id(&self) -> &TrayId {
+        &self.id
     }
 
     pub fn set_state(&self, state: TrayState) -> TrayResult<()> {
@@ -96,4 +123,46 @@ pub(crate) fn set_state_inner(
     sender.send(BackendCommand::SetState(state.clone()))?;
     *last_state = Some(state);
     Ok(())
+}
+
+fn next_tray_id() -> TrayId {
+    let id = TRAY_ID_COUNTER.fetch_add(1, Ordering::AcqRel);
+    TrayId::new(format!("tray-{id}"))
+}
+
+fn resolve_options(options: TrayOptions) -> TrayResult<(TrayId, PlatformOptions)> {
+    let TrayOptions { id, platform } = options;
+
+    let id = id.unwrap_or_else(next_tray_id);
+    if !id.is_valid() {
+        return Err(TrayError::InvalidTrayId);
+    }
+    Ok((id, platform))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_tray_ids_are_distinct() {
+        let (first, _) = resolve_options(TrayOptions::new()).unwrap();
+        let (second, _) = resolve_options(TrayOptions::new()).unwrap();
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn explicit_tray_id_is_preserved() {
+        let (id, _) = resolve_options(TrayOptions::new().with_id("main")).unwrap();
+
+        assert_eq!(id.as_str(), "main");
+    }
+
+    #[test]
+    fn blank_explicit_tray_id_is_rejected() {
+        let err = resolve_options(TrayOptions::new().with_id("   ")).unwrap_err();
+
+        assert_eq!(err, TrayError::InvalidTrayId);
+    }
 }

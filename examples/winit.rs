@@ -84,7 +84,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         println!("{event:?}");
         match event {
-            UserEvent::Tray(TrayEvent::MenuItemActivated { item_id })
+            UserEvent::Tray(TrayEvent::MenuItemActivated { item_id, .. })
                 if item_id.as_str() == SYNC_ID =>
             {
                 self.sync_enabled = !self.sync_enabled;
@@ -92,7 +92,7 @@ impl ApplicationHandler<UserEvent> for App {
                     eprintln!("failed to update tray: {err}");
                 }
             },
-            UserEvent::Tray(TrayEvent::MenuItemActivated { item_id })
+            UserEvent::Tray(TrayEvent::MenuItemActivated { item_id, .. })
                 if item_id.as_str() == QUIT_ID =>
             {
                 self.shutdown_tray();

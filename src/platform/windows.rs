@@ -26,7 +26,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::backend::plan::{BackendCommandId, MenuPlan, PlannedNode, PlannedNodeKind, plan_menu};
 use crate::backend::{BackendCommand, BackendRuntime};
 use crate::{
-    ActivationMode, EventSink, Icon, MenuItemId, TrayError, TrayEvent, TrayIconEventKind,
+    ActivationMode, EventSink, Icon, MenuItemId, TrayError, TrayEvent, TrayIconEventKind, TrayId,
     TrayResult, TrayState, TrayStatus,
 };
 
@@ -41,13 +41,14 @@ pub(crate) fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
     _options: PlatformOptions,
+    tray_id: TrayId,
 ) -> TrayResult<BackendRuntime> {
     let (command_tx, command_rx) = mpsc::channel();
     let (init_tx, init_rx) = mpsc::channel();
 
     let join = thread::Builder::new()
         .name("trayinit-windows-backend".into())
-        .spawn(move || backend_thread(initial_state, sink, command_rx, init_tx))
+        .spawn(move || backend_thread(initial_state, sink, tray_id, command_rx, init_tx))
         .map_err(|err| TrayError::ThreadInit(err.to_string()))?;
 
     let hwnd = init_rx.recv().map_err(|_| {
@@ -64,6 +65,7 @@ pub(crate) fn spawn(
 fn backend_thread(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
+    tray_id: TrayId,
     command_rx: Receiver<BackendCommand>,
     init_tx: mpsc::Sender<TrayResult<isize>>,
 ) {
@@ -133,6 +135,7 @@ fn backend_thread(
         hwnd,
         command_rx,
         sink,
+        tray_id,
         taskbar_created_msg,
         native: NativeTray::new(initial_state),
         closed: false,
@@ -175,6 +178,7 @@ struct ThreadState {
     hwnd: HWND,
     command_rx: Receiver<BackendCommand>,
     sink: Arc<dyn EventSink>,
+    tray_id: TrayId,
     taskbar_created_msg: u32,
     native: NativeTray,
     closed: bool,
@@ -230,7 +234,10 @@ impl ThreadState {
                 },
                 ApplyError::Backend(message) => TrayStatus::BackendError(message),
             };
-            let event = TrayEvent::StatusChanged { status };
+            let event = TrayEvent::StatusChanged {
+                tray_id: self.tray_id.clone(),
+                status,
+            };
             self.sink.send(event);
         }
     }
@@ -260,6 +267,7 @@ impl ThreadState {
         };
 
         let event = TrayEvent::IconActivated {
+            tray_id: self.tray_id.clone(),
             kind,
             position: cursor_position(),
             rect: None,
@@ -270,7 +278,10 @@ impl ThreadState {
             && !self.native.hmenu.is_null()
             && let Some(item_id) = self.native.track_menu(self.hwnd)
         {
-            let event = TrayEvent::MenuItemActivated { item_id };
+            let event = TrayEvent::MenuItemActivated {
+                tray_id: self.tray_id.clone(),
+                item_id,
+            };
             self.sink.send(event);
         }
     }

@@ -7,6 +7,7 @@ pub type TrayResult<T> = Result<T, TrayError>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrayError {
     InvalidState(InvalidState),
+    InvalidTrayId,
     UnsupportedPlatform,
     NotMainThread,
     BackendUnavailable(String),
@@ -25,6 +26,7 @@ impl fmt::Display for TrayError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidState(err) => write!(f, "invalid tray state: {err}"),
+            Self::InvalidTrayId => write!(f, "tray id must not be empty"),
             Self::UnsupportedPlatform => {
                 write!(f, "tray backend is not available on this platform")
             },

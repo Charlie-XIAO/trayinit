@@ -88,7 +88,7 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::{Menu, MenuNode, TrayError, TrayEvent, TrayState};
+    use crate::{Menu, MenuNode, TrayError, TrayEvent, TrayId, TrayState};
 
     #[test]
     fn redundant_state_update_is_not_queued() {
@@ -126,7 +126,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let sender = BackendCommandSender::new(tx, Arc::new(|| {}));
         let last = Arc::new(Mutex::new(Some(TrayState::new())));
-        let handle = crate::TrayHandle::new(sender, last.clone());
+        let handle = crate::TrayHandle::new(TrayId::new("test"), sender, last.clone());
 
         let sink = move |_event: TrayEvent| {
             handle
@@ -135,6 +135,7 @@ mod tests {
         };
 
         sink(TrayEvent::MenuItemActivated {
+            tray_id: TrayId::new("test"),
             item_id: "open".into(),
         });
 
@@ -195,7 +196,8 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let sender = BackendCommandSender::new(tx, Arc::new(|| {}));
         let last_state = Arc::new(Mutex::new(Some(TrayState::new())));
-        let handle = crate::TrayHandle::new(sender.clone(), last_state.clone());
+        let handle =
+            crate::TrayHandle::new(TrayId::new("test"), sender.clone(), last_state.clone());
         let next_state = TrayState::new().with_menu(Menu::new([MenuNode::item("quit", "Quit")]));
 
         sender.send(BackendCommand::Close).unwrap();

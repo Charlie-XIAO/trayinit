@@ -84,7 +84,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::TrayState;
+    use crate::{TrayId, TrayState};
 
     #[test]
     fn close_is_shared_and_idempotent_across_clones() {
@@ -118,7 +118,11 @@ mod tests {
     #[test]
     fn tray_handle_set_state_after_close_is_rejected() {
         let sender = BackendCommandSender::new(Rc::new(|_command| Ok(())));
-        let handle = crate::TrayHandle::new(sender.clone(), Arc::new(Mutex::new(None)));
+        let handle = crate::TrayHandle::new(
+            TrayId::new("test"),
+            sender.clone(),
+            Arc::new(Mutex::new(None)),
+        );
 
         sender.send(BackendCommand::Close).unwrap();
 

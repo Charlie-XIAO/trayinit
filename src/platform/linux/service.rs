@@ -14,7 +14,7 @@ use super::menu::{MenuNode, MenuProperties, MenuTree, ROOT_ID, icon_rgba_to_argb
 use super::runtime;
 use crate::backend::{BackendCommand, BackendRuntime};
 use crate::{
-    EventSink, TrayError, TrayEvent, TrayIconEventKind, TrayResult, TrayState, TrayStatus,
+    EventSink, TrayError, TrayEvent, TrayIconEventKind, TrayId, TrayResult, TrayState, TrayStatus,
 };
 
 const SNI_PATH: &str = "/StatusNotifierItem";
@@ -51,13 +51,14 @@ pub fn spawn(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
     options: PlatformOptions,
+    tray_id: TrayId,
 ) -> TrayResult<BackendRuntime> {
     let (command_tx, command_rx) = mpsc::channel();
     let (init_tx, init_rx) = mpsc::channel();
 
     let join = thread::Builder::new()
         .name("trayinit-linux-backend".into())
-        .spawn(move || backend_thread(initial_state, sink, options, command_rx, init_tx))
+        .spawn(move || backend_thread(initial_state, sink, options, tray_id, command_rx, init_tx))
         .map_err(|err| TrayError::ThreadInit(err.to_string()))?;
 
     init_rx.recv().map_err(|_| {
@@ -71,6 +72,7 @@ fn backend_thread(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
     options: PlatformOptions,
+    tray_id: TrayId,
     command_rx: Receiver<BackendCommand>,
     init_tx: mpsc::Sender<TrayResult<()>>,
 ) {
@@ -78,6 +80,7 @@ fn backend_thread(
         initial_state,
         sink,
         options,
+        tray_id,
         command_rx,
         init_tx.clone(),
     ));
@@ -90,6 +93,7 @@ async fn run_backend(
     initial_state: TrayState,
     sink: Arc<dyn EventSink>,
     options: PlatformOptions,
+    tray_id: TrayId,
     command_rx: Receiver<BackendCommand>,
     init_tx: mpsc::Sender<TrayResult<()>>,
 ) {
@@ -98,9 +102,17 @@ async fn run_backend(
         std::process::id(),
         INSTANCE_COUNTER.fetch_add(1, Ordering::AcqRel)
     );
-    let id = options.id.clone().unwrap_or_else(|| generated_id.clone());
+    let id = options
+        .id
+        .clone()
+        .unwrap_or_else(|| tray_id.as_str().to_owned());
 
-    let service = Arc::new(runtime::Mutex::new(Service::new(id, initial_state, sink)));
+    let service = Arc::new(runtime::Mutex::new(Service::new(
+        id,
+        tray_id,
+        initial_state,
+        sink,
+    )));
 
     let conn = match zbus::connection::Builder::session()
         .map_err(|err| TrayError::BackendUnavailable(err.to_string()))
@@ -345,11 +357,11 @@ fn watcher_error(err: zbus::Error, context: &str) -> TrayError {
 }
 
 async fn emit_status(service: &Arc<runtime::Mutex<Service>>, status: TrayStatus) {
-    let sink = {
+    let (tray_id, sink) = {
         let service = service.lock().await;
-        service.sink.clone()
+        (service.tray_id.clone(), service.sink.clone())
     };
-    sink.send(TrayEvent::StatusChanged { status });
+    sink.send(TrayEvent::StatusChanged { tray_id, status });
 }
 
 async fn apply_state(
@@ -504,6 +516,7 @@ fn diff_properties(
 
 struct Service {
     identity: String,
+    tray_id: TrayId,
     state: TrayState,
     menu: MenuTree,
     sink: Arc<dyn EventSink>,
@@ -511,11 +524,12 @@ struct Service {
 }
 
 impl Service {
-    fn new(identity: String, state: TrayState, sink: Arc<dyn EventSink>) -> Self {
+    fn new(identity: String, tray_id: TrayId, state: TrayState, sink: Arc<dyn EventSink>) -> Self {
         let menu =
             MenuTree::from_menu(state.menu.as_ref(), 0).unwrap_or_else(|_| MenuTree::empty(0));
         Self {
             identity,
+            tray_id,
             state,
             menu,
             sink,
@@ -616,9 +630,13 @@ impl StatusNotifierItemIface {
     }
 
     async fn activate(&self, x: i32, y: i32) -> zbus::fdo::Result<()> {
-        let (has_menu, sink) = {
+        let (has_menu, tray_id, sink) = {
             let service = self.service.lock().await;
-            (has_active_menu(&service.state), service.sink.clone())
+            (
+                has_active_menu(&service.state),
+                service.tray_id.clone(),
+                service.sink.clone(),
+            )
         };
 
         if has_menu {
@@ -626,6 +644,7 @@ impl StatusNotifierItemIface {
         }
 
         sink.send(TrayEvent::IconActivated {
+            tray_id,
             kind: TrayIconEventKind::PrimaryClick,
             position: Some(crate::PhysicalPosition { x, y }),
             rect: None,
@@ -634,11 +653,12 @@ impl StatusNotifierItemIface {
     }
 
     async fn secondary_activate(&self, x: i32, y: i32) -> zbus::fdo::Result<()> {
-        let sink = {
+        let (tray_id, sink) = {
             let service = self.service.lock().await;
-            service.sink.clone()
+            (service.tray_id.clone(), service.sink.clone())
         };
         sink.send(TrayEvent::IconActivated {
+            tray_id,
             kind: TrayIconEventKind::SecondaryClick,
             position: Some(crate::PhysicalPosition { x, y }),
             rect: None,
@@ -815,16 +835,16 @@ impl DbusMenuIface {
             return Ok(());
         }
 
-        let (item_id, sink) = {
+        let (tray_id, item_id, sink) = {
             let service = self.service.lock().await;
             let item_id = service
                 .menu
                 .action_for(id)
                 .ok_or_else(|| zbus::fdo::Error::InvalidArgs("id not found".into()))?;
-            (item_id, service.sink.clone())
+            (service.tray_id.clone(), item_id, service.sink.clone())
         };
 
-        sink.send(TrayEvent::MenuItemActivated { item_id });
+        sink.send(TrayEvent::MenuItemActivated { tray_id, item_id });
         Ok(())
     }
 
@@ -1054,7 +1074,12 @@ mod tests {
     #[test]
     fn linux_id_option_controls_sni_id_property() {
         let (sink, _events) = channel();
-        let service = Service::new("custom-id".into(), TrayState::new(), Arc::new(sink));
+        let service = Service::new(
+            "custom-id".into(),
+            TrayId::new("test"),
+            TrayState::new(),
+            Arc::new(sink),
+        );
 
         assert_eq!(service.identity, "custom-id");
     }
@@ -1064,7 +1089,7 @@ mod tests {
         let (sink, _events) = channel();
         let initial =
             TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", false)]));
-        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
 
         let changes = service.set_state(
             TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", true)])),
@@ -1089,7 +1114,7 @@ mod tests {
     fn label_change_updates_label_property() {
         let (sink, _events) = channel();
         let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
-        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
 
         let changes = service.set_state(
             TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open file")])),
@@ -1113,7 +1138,7 @@ mod tests {
     fn item_to_check_updates_toggle_properties() {
         let (sink, _events) = channel();
         let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("sync", "Sync")]));
-        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
 
         let changes = service.set_state(
             TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", true)])),
@@ -1138,7 +1163,7 @@ mod tests {
         let (sink, _events) = channel();
         let initial =
             TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", true)]));
-        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
 
         let changes = service
             .set_state(TrayState::new().with_menu(Menu::new([MenuNode::item("sync", "Sync")])));
@@ -1160,7 +1185,7 @@ mod tests {
     fn layout_menu_update_bumps_revision() {
         let (sink, _events) = channel();
         let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
-        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
 
         let changes = service.set_state(TrayState::new().with_menu(Menu::new([
             MenuNode::item("open", "Open"),
@@ -1179,7 +1204,7 @@ mod tests {
             "More",
             [MenuNode::item("about", "About")],
         )]));
-        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
 
         let changes =
             service.set_state(TrayState::new().with_menu(Menu::new([MenuNode::submenu(
@@ -1197,7 +1222,7 @@ mod tests {
     fn action_id_only_change_updates_mapping_without_signal() {
         let (sink, _events) = channel();
         let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
-        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
 
         let changes = service
             .set_state(TrayState::new().with_menu(Menu::new([MenuNode::item("open-2", "Open")])));
