@@ -325,7 +325,7 @@ impl NativeTray {
             return Ok(());
         };
 
-        let plan = plan_menu(menu).map_err(|err| ApplyError::Backend(err.to_string()))?;
+        let plan = plan_menu(menu, 0).map_err(|err| ApplyError::Backend(err.to_string()))?;
         let hmenu = build_menu(&plan).map_err(ApplyError::Backend)?;
         self.hmenu = hmenu;
         self.command_map = plan.command_map;

@@ -327,7 +327,12 @@ define_class!(
     impl TrayTarget {
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
-            self.handle_click(TrayIconEventKind::PrimaryClick, event);
+            let kind = if event.clickCount() == 2 {
+                TrayIconEventKind::DoubleClick
+            } else {
+                TrayIconEventKind::PrimaryClick
+            };
+            self.handle_click(kind, event);
         }
 
         #[unsafe(method(rightMouseDown:))]

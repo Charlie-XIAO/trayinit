@@ -52,11 +52,19 @@ impl MenuTree {
     }
 
     pub fn from_menu(menu: Option<&Menu>, revision: u32) -> TrayResult<Self> {
+        Self::from_menu_with_base(menu, 0, revision)
+    }
+
+    pub fn from_menu_with_base(
+        menu: Option<&Menu>,
+        base_id: i32,
+        revision: u32,
+    ) -> TrayResult<Self> {
         let Some(menu) = menu else {
             return Ok(Self::empty(revision));
         };
 
-        let plan = plan_menu(menu)?;
+        let plan = plan_menu(menu, u32::try_from(base_id).expect("base id overflow"))?;
         let mut action_map = HashMap::new();
         let children = plan
             .nodes
@@ -108,6 +116,10 @@ impl MenuTree {
 
     fn find_node(&self, id: i32) -> Option<&MenuNode> {
         find_node(&self.root, id)
+    }
+
+    pub fn max_id(&self) -> i32 {
+        max_node_id(&self.root)
     }
 }
 
@@ -247,8 +259,15 @@ fn find_node(node: &MenuNode, id: i32) -> Option<&MenuNode> {
     if node.id == id {
         return Some(node);
     }
-
     node.children.iter().find_map(|node| find_node(node, id))
+}
+
+fn max_node_id(node: &MenuNode) -> i32 {
+    let mut max = node.id;
+    for child in &node.children {
+        max = max.max(max_node_id(child));
+    }
+    max
 }
 
 #[cfg(test)]

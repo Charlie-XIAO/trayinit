@@ -66,7 +66,7 @@ mod tests {
             [MenuNode::item("about", "About")],
         )]);
 
-        let plan = backend::plan::plan_menu(&menu).unwrap();
+        let plan = backend::plan::plan_menu(&menu, 0).unwrap();
         assert_eq!(plan.nodes.len(), 1);
         assert!(plan.nodes[0].explicit_id.is_none());
         assert_eq!(plan.command_map.len(), 1);
@@ -106,7 +106,7 @@ mod tests {
             MenuNode::submenu("More", [MenuNode::item("about", "About")]),
         ]);
 
-        let plan = backend::plan::plan_menu(&menu).unwrap();
+        let plan = backend::plan::plan_menu(&menu, 0).unwrap();
         let mut command_pairs: Vec<_> = plan
             .command_map
             .iter()

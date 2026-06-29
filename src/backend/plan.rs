@@ -49,16 +49,25 @@ pub struct PlannedSubmenu {
     pub enabled: bool,
 }
 
-#[derive(Default)]
 struct PlanBuilder {
     next_backend_id: BackendMenuId,
     next_command_id: BackendCommandId,
     command_map: HashMap<BackendCommandId, MenuItemId>,
 }
 
-pub fn plan_menu(menu: &Menu) -> TrayResult<MenuPlan> {
+impl PlanBuilder {
+    fn new(base_id: BackendMenuId) -> Self {
+        Self {
+            next_backend_id: base_id,
+            next_command_id: 0,
+            command_map: HashMap::new(),
+        }
+    }
+}
+
+pub fn plan_menu(menu: &Menu, base_id: BackendMenuId) -> TrayResult<MenuPlan> {
     validate_menu(menu)?;
-    let mut builder = PlanBuilder::default();
+    let mut builder = PlanBuilder::new(base_id);
     let nodes = builder.plan_nodes(menu.nodes());
     Ok(MenuPlan {
         nodes,

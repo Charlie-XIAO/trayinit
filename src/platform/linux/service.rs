@@ -30,10 +30,19 @@ pub struct PlatformOptions {
     pub id: Option<String>,
 }
 
+/// Policy for andling tray registration failures at startup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StartupPolicy {
+    /// Soft start (default).
+    ///
+    /// Allows the tray to be created successfully even if no DBus
+    /// StatusNotifierWathcer or StatusNotifierHost is present. The tray will
+    /// automatically register and become available one they appear at runtime.
     Soft,
+    /// Requires a StatusNotifierWatcher to be registered at startup.
     RequireWatcher,
+    /// Requires a StatusNotifierWatcher and at least one active
+    /// StatusNotifierHost to be registered at startup.
     RequireHost,
 }
 
@@ -183,6 +192,18 @@ async fn run_backend(
         },
     }
 
+    let watcher_proxy = StatusNotifierWatcherProxy::new(&conn).await.ok();
+    let mut host_registered = if let Some(proxy) = &watcher_proxy {
+        proxy.receive_status_notifier_host_registered().await.ok()
+    } else {
+        None
+    };
+    let mut host_unregistered = if let Some(proxy) = &watcher_proxy {
+        proxy.receive_status_notifier_host_unregistered().await.ok()
+    } else {
+        None
+    };
+
     let mut watcher_changes = match zbus::fdo::DBusProxy::new(&conn).await {
         Ok(proxy) => proxy
             .receive_name_owner_changed_with_args(&[(0, WATCHER_NAME)])
@@ -204,32 +225,71 @@ async fn run_backend(
             CommandOutcome::Close => break,
         }
 
-        if let Some(changes) = &mut watcher_changes {
-            let event = changes.next().fuse();
-            let timeout = runtime::sleep(Duration::from_millis(25)).fuse();
-            pin_mut!(event, timeout);
-            select! {
-                event = event => {
-                    if let Some(event) = event
-                        && let Ok(args) = event.args()
-                    {
-                        if args.new_owner.as_ref().is_some() {
-                            update_watcher_status(&conn, &registration_name, &service).await;
-                        } else {
-                            emit_status(
-                                &service,
-                                TrayStatus::WatcherUnavailable(
-                                    "StatusNotifierWatcher disappeared".into(),
-                                ),
-                            )
-                            .await;
+        let watcher_next = async {
+            if let Some(changes) = &mut watcher_changes {
+                changes.next().await
+            } else {
+                futures_util::future::pending().await
+            }
+        }
+        .fuse();
+
+        let host_reg_next = async {
+            if let Some(stream) = &mut host_registered {
+                stream.next().await
+            } else {
+                futures_util::future::pending().await
+            }
+        }
+        .fuse();
+
+        let host_unreg_next = async {
+            if let Some(stream) = &mut host_unregistered {
+                stream.next().await
+            } else {
+                futures_util::future::pending().await
+            }
+        }
+        .fuse();
+
+        let timeout = runtime::sleep(Duration::from_millis(25)).fuse();
+        pin_mut!(watcher_next, host_reg_next, host_unreg_next, timeout);
+
+        select! {
+            event = watcher_next => {
+                if let Some(event) = event
+                    && let Ok(args) = event.args()
+                {
+                    if args.new_owner.as_ref().is_some() {
+                        update_watcher_status(&conn, &registration_name, &service).await;
+                        if let Some(proxy) = &watcher_proxy {
+                            host_registered = proxy.receive_status_notifier_host_registered().await.ok();
+                            host_unregistered = proxy.receive_status_notifier_host_unregistered().await.ok();
                         }
+                    } else {
+                        emit_status(
+                            &service,
+                            TrayStatus::WatcherUnavailable(
+                                "StatusNotifierWatcher disappeared".into(),
+                            ),
+                        )
+                        .await;
+                        host_registered = None;
+                        host_unregistered = None;
                     }
                 }
-                _ = timeout => {}
             }
-        } else {
-            runtime::sleep(Duration::from_millis(25)).await;
+            reg = host_reg_next => {
+                if reg.is_some() {
+                    update_watcher_status(&conn, &registration_name, &service).await;
+                }
+            }
+            unreg = host_unreg_next => {
+                if unreg.is_some() {
+                    update_watcher_status(&conn, &registration_name, &service).await;
+                }
+            }
+            _ = timeout => {}
         }
     }
 
@@ -519,6 +579,7 @@ struct Service {
     tray_id: TrayId,
     state: TrayState,
     menu: MenuTree,
+    menu_id_base: i32,
     sink: Arc<dyn EventSink>,
     revision: u32,
 }
@@ -532,6 +593,7 @@ impl Service {
             tray_id,
             state,
             menu,
+            menu_id_base: 0,
             sink,
             revision: 0,
         }
@@ -541,19 +603,37 @@ impl Service {
         let old = self.state.clone();
         let menu = if old.menu != state.menu {
             let next_revision = self.revision.wrapping_add(1);
-            let mut next_menu = MenuTree::from_menu(state.menu.as_ref(), next_revision)
-                .unwrap_or_else(|_| MenuTree::empty(next_revision));
-            let menu_change = diff_menu(&self.menu, &next_menu);
+            let new_menu = MenuTree::from_menu_with_base(
+                state.menu.as_ref(),
+                self.menu_id_base,
+                next_revision,
+            )
+            .unwrap_or_else(|_| MenuTree::empty(next_revision));
+            let menu_change = diff_menu(&self.menu, &new_menu);
 
             match menu_change {
                 MenuChange::LayoutUpdated => {
+                    let max_id = self.menu.max_id();
+                    let mut next_base = (self.menu_id_base + max_id) & 0x7FFFFFFF;
+                    if next_base == 0 {
+                        next_base = 1;
+                    }
+                    self.menu_id_base = next_base;
+
+                    let new_menu_with_new_base = MenuTree::from_menu_with_base(
+                        state.menu.as_ref(),
+                        self.menu_id_base,
+                        next_revision,
+                    )
+                    .unwrap_or_else(|_| MenuTree::empty(next_revision));
                     self.revision = next_revision;
-                    self.menu = next_menu;
+                    self.menu = new_menu_with_new_base;
                     MenuChange::LayoutUpdated
                 },
                 MenuChange::PropertiesUpdated { .. } | MenuChange::None => {
-                    next_menu.revision = self.revision;
-                    self.menu = next_menu;
+                    let mut final_menu = new_menu;
+                    final_menu.revision = self.revision;
+                    self.menu = final_menu;
                     menu_change
                 },
             }
@@ -614,13 +694,6 @@ impl StatusNotifierItemIface {
     }
 }
 
-fn has_active_menu(state: &TrayState) -> bool {
-    state
-        .menu
-        .as_ref()
-        .is_some_and(|menu| !menu.nodes().is_empty())
-}
-
 #[zbus::interface(name = "org.kde.StatusNotifierItem")]
 impl StatusNotifierItemIface {
     fn context_menu(&self, _x: i32, _y: i32) -> zbus::fdo::Result<()> {
@@ -633,7 +706,7 @@ impl StatusNotifierItemIface {
         let (has_menu, tray_id, sink) = {
             let service = self.service.lock().await;
             (
-                has_active_menu(&service.state),
+                service.state.menu.is_some(),
                 service.tray_id.clone(),
                 service.sink.clone(),
             )
@@ -711,7 +784,7 @@ impl StatusNotifierItemIface {
     #[zbus(property)]
     async fn item_is_menu(&self) -> zbus::fdo::Result<bool> {
         let service = self.service.lock().await;
-        Ok(has_active_menu(&service.state))
+        Ok(service.state.menu.is_some())
     }
 
     #[zbus(property)]
@@ -918,6 +991,12 @@ trait StatusNotifierWatcher {
 
     #[zbus(property)]
     fn is_status_notifier_host_registered(&self) -> zbus::Result<bool>;
+
+    #[zbus(signal)]
+    fn status_notifier_host_registered(&self) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    fn status_notifier_host_unregistered(&self) -> zbus::Result<()>;
 }
 
 fn layout_to_dbus(node: MenuNode) -> DbusMenuLayout {
@@ -973,32 +1052,6 @@ fn insert_str(
 mod tests {
     use super::*;
     use crate::{Menu, MenuNode, TrayState, channel};
-
-    #[test]
-    fn absent_menu_is_not_active_menu() {
-        assert!(!has_active_menu(&TrayState::new()));
-    }
-
-    #[test]
-    fn empty_menu_is_not_active_menu() {
-        let state = TrayState::new().with_menu(Menu::empty());
-
-        assert!(!has_active_menu(&state));
-    }
-
-    #[test]
-    fn actionable_menu_is_active_menu() {
-        let state = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
-
-        assert!(has_active_menu(&state));
-    }
-
-    #[test]
-    fn separator_only_menu_is_active_menu() {
-        let state = TrayState::new().with_menu(Menu::new([MenuNode::separator()]));
-
-        assert!(has_active_menu(&state));
-    }
 
     #[test]
     fn default_linux_options_soft_start_and_own_name() {
@@ -1229,5 +1282,35 @@ mod tests {
 
         assert!(matches!(changes.menu, MenuChange::None));
         assert_eq!(service.menu.action_for(1).unwrap().as_str(), "open-2");
+    }
+
+    #[test]
+    fn layout_update_offsets_menu_ids() {
+        let (sink, _events) = channel();
+        let initial = TrayState::new().with_menu(Menu::new([
+            MenuNode::item("open", "Open"),
+            MenuNode::item("quit", "Quit"),
+        ]));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
+
+        assert_eq!(service.menu.max_id(), 2);
+
+        // Add an item to trigger layout update
+        let changes = service.set_state(TrayState::new().with_menu(Menu::new([
+            MenuNode::item("about", "About"),
+            MenuNode::item("help", "Help"),
+            MenuNode::item("quit", "Quit"),
+        ])));
+
+        assert!(matches!(changes.menu, MenuChange::LayoutUpdated));
+        assert_eq!(service.menu_id_base, 2);
+        assert_eq!(service.menu.max_id(), 5);
+
+        assert_eq!(service.menu.action_for(3).unwrap().as_str(), "about");
+        assert_eq!(service.menu.action_for(4).unwrap().as_str(), "help");
+        assert_eq!(service.menu.action_for(5).unwrap().as_str(), "quit");
+
+        assert!(service.menu.action_for(1).is_none());
+        assert!(service.menu.action_for(2).is_none());
     }
 }
