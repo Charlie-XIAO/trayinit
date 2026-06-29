@@ -5,12 +5,12 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 use windows_sys::Win32::Foundation::{
-    ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM,
+    ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, WPARAM,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-    Shell_NotifyIconW,
+    NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect, Shell_NotifyIconW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CS_HREDRAW, CS_VREDRAW, ChangeWindowMessageFilterEx, CreatePopupMenu,
@@ -270,7 +270,7 @@ impl ThreadState {
             tray_id: self.tray_id.clone(),
             kind,
             position: cursor_position(),
-            rect: None,
+            rect: tray_rect(self.hwnd),
         };
         self.sink.send(event);
 
@@ -655,6 +655,38 @@ fn cursor_position() -> Option<crate::PhysicalPosition> {
     }
 }
 
+fn tray_rect(hwnd: HWND) -> Option<crate::PhysicalRect> {
+    let identifier = NOTIFYICONIDENTIFIER {
+        cbSize: std::mem::size_of::<NOTIFYICONIDENTIFIER>() as u32,
+        hWnd: hwnd,
+        uID: TRAY_UID,
+        ..unsafe { std::mem::zeroed() }
+    };
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+
+    if unsafe { Shell_NotifyIconGetRect(&identifier, &mut rect) } == S_OK {
+        Some(rect_to_physical(rect))
+    } else {
+        None
+    }
+}
+
+fn rect_to_physical(rect: RECT) -> crate::PhysicalRect {
+    crate::PhysicalRect {
+        position: crate::PhysicalPosition {
+            x: rect.left,
+            y: rect.top,
+        },
+        width: rect.right.saturating_sub(rect.left) as u32,
+        height: rect.bottom.saturating_sub(rect.top) as u32,
+    }
+}
+
 fn wide_z(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -710,5 +742,20 @@ mod tests {
         assert_eq!(mask[0], 0x80);
         assert_eq!(mask[1], 0x80);
         assert_eq!(mask[4], 0x40);
+    }
+
+    #[test]
+    fn win32_rect_converts_to_physical_rect() {
+        let rect = rect_to_physical(RECT {
+            left: 10,
+            top: 20,
+            right: 42,
+            bottom: 52,
+        });
+
+        assert_eq!(rect.position.x, 10);
+        assert_eq!(rect.position.y, 20);
+        assert_eq!(rect.width, 32);
+        assert_eq!(rect.height, 32);
     }
 }

@@ -52,10 +52,15 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
   "NSStatusBarButton",
   "NSStatusItem",
   "NSView",
+  "NSWindow",
 ] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
   "std",
   "CFCGTypes",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+  "std",
+  "CGDirectDisplay",
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
   "std",

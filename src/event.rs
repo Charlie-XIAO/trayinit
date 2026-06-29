@@ -35,7 +35,9 @@ pub enum TrayEvent {
     /// platform. On Windows and macOS, a menu-opening click emits this event
     /// before any resulting [`TrayEvent::MenuItemActivated`]. Other backends
     /// may only emit icon activation for gestures that are exposed by the
-    /// desktop host.
+    /// desktop host. `position` and `rect` are best-effort physical screen
+    /// coordinates; Linux StatusNotifierItem hosts generally do not expose a
+    /// tray item rectangle, so `rect` may be `None`.
     IconActivated {
         tray_id: TrayId,
         kind: TrayIconEventKind,

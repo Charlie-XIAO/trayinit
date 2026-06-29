@@ -9,13 +9,15 @@ use objc2::{AnyThread, DeclaredClass, MainThreadOnly, Message, define_class, msg
 use objc2_app_kit::{
     NSApplication, NSCellImagePosition, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
     NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSView,
+    NSWindow,
 };
+use objc2_core_graphics::{CGDisplayPixelsHigh, CGMainDisplayID};
 use objc2_foundation::{MainThreadMarker, NSData, NSSize, NSString};
 
 use crate::backend::{BackendCommand, BackendCommandSender, BackendRuntime};
 use crate::{
-    ActivationMode, EventSink, Icon, Menu, MenuNode, TrayError, TrayEvent, TrayIconEventKind,
-    TrayId, TrayResult, TrayState,
+    ActivationMode, EventSink, Icon, Menu, MenuNode, PhysicalPosition, PhysicalRect, TrayError,
+    TrayEvent, TrayIconEventKind, TrayId, TrayResult, TrayState,
 };
 
 #[derive(Debug, Default)]
@@ -324,13 +326,13 @@ define_class!(
 
     impl TrayTarget {
         #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, _event: &NSEvent) {
-            self.handle_click(TrayIconEventKind::PrimaryClick);
+        fn mouse_down(&self, event: &NSEvent) {
+            self.handle_click(TrayIconEventKind::PrimaryClick, event);
         }
 
         #[unsafe(method(rightMouseDown:))]
-        fn right_mouse_down(&self, _event: &NSEvent) {
-            self.handle_click(TrayIconEventKind::SecondaryClick);
+        fn right_mouse_down(&self, event: &NSEvent) {
+            self.handle_click(TrayIconEventKind::SecondaryClick, event);
         }
 
         #[unsafe(method(mouseUp:))]
@@ -383,12 +385,17 @@ impl TrayTarget {
         }
     }
 
-    fn handle_click(&self, kind: TrayIconEventKind) {
+    fn handle_click(&self, kind: TrayIconEventKind, event: &NSEvent) {
+        let mtm = MainThreadMarker::from(self);
+        let window = event.window(mtm);
+        let rect = window.as_deref().map(tray_rect);
+        let position = window.as_deref().map(cursor_position);
+
         self.ivars().sink.send(TrayEvent::IconActivated {
             tray_id: self.ivars().tray_id.clone(),
             kind,
-            position: None,
-            rect: None,
+            position,
+            rect,
         });
 
         if should_open_menu(self.ivars().activation_mode.get(), kind)
@@ -424,6 +431,53 @@ fn should_open_menu(activation_mode: ActivationMode, kind: TrayIconEventKind) ->
         },
         ActivationMode::MenuOnSecondaryClick => kind == TrayIconEventKind::SecondaryClick,
     }
+}
+
+fn tray_rect(window: &NSWindow) -> PhysicalRect {
+    let frame = window.frame();
+    let scale = window.backingScaleFactor();
+    physical_rect(
+        frame.origin.x,
+        flip_screen_y(frame.origin.y) - frame.size.height,
+        frame.size.width,
+        frame.size.height,
+        scale,
+    )
+}
+
+fn cursor_position(window: &NSWindow) -> PhysicalPosition {
+    let point = NSEvent::mouseLocation();
+    let scale = window.backingScaleFactor();
+    physical_position(point.x, flip_screen_y(point.y), scale)
+}
+
+fn physical_rect(x: f64, y: f64, width: f64, height: f64, scale: f64) -> PhysicalRect {
+    PhysicalRect {
+        position: physical_position(x, y, scale),
+        width: logical_to_u32(width, scale),
+        height: logical_to_u32(height, scale),
+    }
+}
+
+fn physical_position(x: f64, y: f64, scale: f64) -> PhysicalPosition {
+    PhysicalPosition {
+        x: logical_to_i32(x, scale),
+        y: logical_to_i32(y, scale),
+    }
+}
+
+fn logical_to_i32(value: f64, scale: f64) -> i32 {
+    (value * scale)
+        .round()
+        .clamp(i32::MIN as f64, i32::MAX as f64) as i32
+}
+
+fn logical_to_u32(value: f64, scale: f64) -> u32 {
+    (value * scale).round().clamp(0.0, u32::MAX as f64) as u32
+}
+
+fn flip_screen_y(y: f64) -> f64 {
+    CGDisplayPixelsHigh(CGMainDisplayID()) as f64 - y
 }
 
 struct TrayMenuItemIvars {
@@ -518,5 +572,23 @@ mod tests {
             ActivationMode::MenuOnSecondaryClick,
             TrayIconEventKind::SecondaryClick
         ));
+    }
+
+    #[test]
+    fn logical_rect_converts_to_physical_rect() {
+        let rect = physical_rect(10.0, 20.0, 16.0, 18.0, 2.0);
+
+        assert_eq!(rect.position.x, 20);
+        assert_eq!(rect.position.y, 40);
+        assert_eq!(rect.width, 32);
+        assert_eq!(rect.height, 36);
+    }
+
+    #[test]
+    fn logical_position_conversion_rounds_to_nearest_pixel() {
+        let position = physical_position(10.25, 20.75, 2.0);
+
+        assert_eq!(position.x, 21);
+        assert_eq!(position.y, 42);
     }
 }
