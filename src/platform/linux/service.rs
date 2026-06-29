@@ -387,21 +387,119 @@ async fn apply_state(
         };
         StatusNotifierItemIface::new_status(sni.signal_emitter(), &status).await?;
     }
-    if changes.menu {
-        DbusMenuIface::layout_updated(menu.signal_emitter(), changes.revision, ROOT_ID).await?;
+    match changes.menu {
+        MenuChange::None => {},
+        MenuChange::LayoutUpdated => {
+            DbusMenuIface::layout_updated(menu.signal_emitter(), changes.revision, ROOT_ID).await?;
+        },
+        MenuChange::PropertiesUpdated { updated, removed } => {
+            DbusMenuIface::items_properties_updated(menu.signal_emitter(), updated, removed)
+                .await?;
+        },
     }
 
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct StateChanges {
     title: bool,
     icon: bool,
     tooltip: bool,
     status: bool,
-    menu: bool,
+    menu: MenuChange,
     revision: u32,
+}
+
+#[derive(Debug)]
+enum MenuChange {
+    None,
+    LayoutUpdated,
+    PropertiesUpdated {
+        updated: Vec<(i32, HashMap<String, OwnedValue>)>,
+        removed: Vec<(i32, Vec<String>)>,
+    },
+}
+
+#[derive(Default)]
+struct FlatMenu {
+    properties: HashMap<i32, HashMap<String, OwnedValue>>,
+    children: HashMap<i32, Vec<i32>>,
+}
+
+impl FlatMenu {
+    fn from_tree(tree: &MenuTree) -> Self {
+        let mut flat = Self::default();
+        flatten_node(&tree.root, &mut flat);
+        flat
+    }
+}
+
+fn flatten_node(node: &MenuNode, flat: &mut FlatMenu) {
+    flat.properties
+        .insert(node.id, properties_to_dbus(node.properties.clone()));
+    flat.children.insert(
+        node.id,
+        node.children.iter().map(|child| child.id).collect(),
+    );
+
+    for child in &node.children {
+        flatten_node(child, flat);
+    }
+}
+
+fn diff_menu(old: &MenuTree, new: &MenuTree) -> MenuChange {
+    let old = FlatMenu::from_tree(old);
+    let new = FlatMenu::from_tree(new);
+
+    if old.children != new.children {
+        return MenuChange::LayoutUpdated;
+    }
+
+    let mut updated = Vec::new();
+    let mut removed = Vec::new();
+
+    for (id, new_props) in &new.properties {
+        if let Some(old_props) = old.properties.get(id) {
+            let (item_updated, item_removed) = diff_properties(old_props, new_props);
+            if !item_updated.is_empty() {
+                updated.push((*id, item_updated));
+            }
+            if !item_removed.is_empty() {
+                removed.push((*id, item_removed));
+            }
+        } else if !new_props.is_empty() {
+            updated.push((*id, new_props.clone()));
+        }
+    }
+
+    if updated.is_empty() && removed.is_empty() {
+        MenuChange::None
+    } else {
+        MenuChange::PropertiesUpdated { updated, removed }
+    }
+}
+
+fn diff_properties(
+    old: &HashMap<String, OwnedValue>,
+    new: &HashMap<String, OwnedValue>,
+) -> (HashMap<String, OwnedValue>, Vec<String>) {
+    let mut updated = HashMap::new();
+    let mut removed = Vec::new();
+
+    for (key, new_value) in new {
+        if old.get(key) != Some(new_value) {
+            updated.insert(key.clone(), new_value.clone());
+        }
+    }
+
+    for key in old.keys() {
+        if !new.contains_key(key) {
+            removed.push(key.clone());
+        }
+    }
+
+    (updated, removed)
 }
 
 struct Service {
@@ -427,12 +525,27 @@ impl Service {
 
     fn set_state(&mut self, state: TrayState) -> StateChanges {
         let old = self.state.clone();
-        let menu_changed = old.menu != state.menu;
-        if menu_changed {
-            self.revision = self.revision.wrapping_add(1);
-            self.menu = MenuTree::from_menu(state.menu.as_ref(), self.revision)
-                .unwrap_or_else(|_| MenuTree::empty(self.revision));
-        }
+        let menu = if old.menu != state.menu {
+            let next_revision = self.revision.wrapping_add(1);
+            let mut next_menu = MenuTree::from_menu(state.menu.as_ref(), next_revision)
+                .unwrap_or_else(|_| MenuTree::empty(next_revision));
+            let menu_change = diff_menu(&self.menu, &next_menu);
+
+            match menu_change {
+                MenuChange::LayoutUpdated => {
+                    self.revision = next_revision;
+                    self.menu = next_menu;
+                    MenuChange::LayoutUpdated
+                },
+                MenuChange::PropertiesUpdated { .. } | MenuChange::None => {
+                    next_menu.revision = self.revision;
+                    self.menu = next_menu;
+                    menu_change
+                },
+            }
+        } else {
+            MenuChange::None
+        };
         self.state = state;
 
         StateChanges {
@@ -440,7 +553,7 @@ impl Service {
             icon: old.icon != self.state.icon,
             tooltip: old.tooltip != self.state.tooltip,
             status: old.visible != self.state.visible,
-            menu: menu_changed,
+            menu,
             revision: self.revision,
         }
     }
@@ -757,6 +870,13 @@ impl DbusMenuIface {
     }
 
     #[zbus(signal)]
+    async fn items_properties_updated(
+        ctxt: &SignalEmitter<'_>,
+        updated_props: Vec<(i32, HashMap<String, OwnedValue>)>,
+        removed_props: Vec<(i32, Vec<String>)>,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
     async fn layout_updated(
         ctxt: &SignalEmitter<'_>,
         revision: u32,
@@ -937,5 +1057,152 @@ mod tests {
         let service = Service::new("custom-id".into(), TrayState::new(), Arc::new(sink));
 
         assert_eq!(service.identity, "custom-id");
+    }
+
+    #[test]
+    fn check_state_change_updates_toggle_state_without_bumping_revision() {
+        let (sink, _events) = channel();
+        let initial =
+            TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", false)]));
+        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+
+        let changes = service.set_state(
+            TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", true)])),
+        );
+
+        assert_eq!(service.revision, 0);
+        match changes.menu {
+            MenuChange::PropertiesUpdated { updated, removed } => {
+                assert!(removed.is_empty());
+                assert_eq!(updated.len(), 1);
+                assert_eq!(updated[0].0, 1);
+                assert_eq!(
+                    updated[0].1.get("toggle-state"),
+                    Some(&OwnedValue::from(1i32))
+                );
+            },
+            other => panic!("expected property update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn label_change_updates_label_property() {
+        let (sink, _events) = channel();
+        let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
+        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+
+        let changes = service.set_state(
+            TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open file")])),
+        );
+
+        match changes.menu {
+            MenuChange::PropertiesUpdated { updated, removed } => {
+                assert!(removed.is_empty());
+                assert_eq!(updated.len(), 1);
+                assert_eq!(updated[0].0, 1);
+                assert_eq!(
+                    updated[0].1.get("label"),
+                    Some(&OwnedValue::from(Str::from("Open file")))
+                );
+            },
+            other => panic!("expected property update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn item_to_check_updates_toggle_properties() {
+        let (sink, _events) = channel();
+        let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("sync", "Sync")]));
+        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+
+        let changes = service.set_state(
+            TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", true)])),
+        );
+
+        match changes.menu {
+            MenuChange::PropertiesUpdated { updated, removed } => {
+                assert!(removed.is_empty());
+                assert_eq!(updated.len(), 1);
+                assert_eq!(updated[0].1.get("toggle-type").map(|_| ()), Some(()));
+                assert_eq!(
+                    updated[0].1.get("toggle-state"),
+                    Some(&OwnedValue::from(1i32))
+                );
+            },
+            other => panic!("expected property update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn check_to_item_removes_toggle_properties() {
+        let (sink, _events) = channel();
+        let initial =
+            TrayState::new().with_menu(Menu::new([MenuNode::check("sync", "Sync", true)]));
+        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+
+        let changes = service
+            .set_state(TrayState::new().with_menu(Menu::new([MenuNode::item("sync", "Sync")])));
+
+        match changes.menu {
+            MenuChange::PropertiesUpdated { updated, removed } => {
+                assert!(updated.is_empty());
+                assert_eq!(removed.len(), 1);
+                assert_eq!(removed[0].0, 1);
+                let mut properties = removed[0].1.clone();
+                properties.sort();
+                assert_eq!(properties, ["toggle-state", "toggle-type"]);
+            },
+            other => panic!("expected property update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn layout_menu_update_bumps_revision() {
+        let (sink, _events) = channel();
+        let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
+        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+
+        let changes = service.set_state(TrayState::new().with_menu(Menu::new([
+            MenuNode::item("open", "Open"),
+            MenuNode::item("quit", "Quit"),
+        ])));
+
+        assert_eq!(service.revision, 1);
+        assert_eq!(changes.revision, 1);
+        assert!(matches!(changes.menu, MenuChange::LayoutUpdated));
+    }
+
+    #[test]
+    fn submenu_child_addition_is_layout_update() {
+        let (sink, _events) = channel();
+        let initial = TrayState::new().with_menu(Menu::new([MenuNode::submenu(
+            "More",
+            [MenuNode::item("about", "About")],
+        )]));
+        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+
+        let changes =
+            service.set_state(TrayState::new().with_menu(Menu::new([MenuNode::submenu(
+                "More",
+                [
+                    MenuNode::item("about", "About"),
+                    MenuNode::item("help", "Help"),
+                ],
+            )])));
+
+        assert!(matches!(changes.menu, MenuChange::LayoutUpdated));
+    }
+
+    #[test]
+    fn action_id_only_change_updates_mapping_without_signal() {
+        let (sink, _events) = channel();
+        let initial = TrayState::new().with_menu(Menu::new([MenuNode::item("open", "Open")]));
+        let mut service = Service::new("tray".into(), initial, Arc::new(sink));
+
+        let changes = service
+            .set_state(TrayState::new().with_menu(Menu::new([MenuNode::item("open-2", "Open")])));
+
+        assert!(matches!(changes.menu, MenuChange::None));
+        assert_eq!(service.menu.action_for(1).unwrap().as_str(), "open-2");
     }
 }

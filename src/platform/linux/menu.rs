@@ -16,7 +16,7 @@ pub const ROOT_ID: i32 = 0;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuTree {
     pub revision: u32,
-    root: MenuNode,
+    pub root: MenuNode,
     action_map: HashMap<i32, MenuItemId>,
 }
 
