@@ -575,7 +575,7 @@ impl Service {
             match menu_change {
                 MenuChange::LayoutUpdated => {
                     let old_max = self.menu.max_id();
-                    let mut next_base = old_max;
+                    let mut next_base = self.menu_id_base.max(old_max);
                     if next_base <= 0 || next_base >= i32::MAX - 10000 {
                         next_base = 0;
                     }
@@ -1255,6 +1255,40 @@ mod tests {
         assert_eq!(service.menu.action_for(3).unwrap().as_str(), "about");
         assert_eq!(service.menu.action_for(4).unwrap().as_str(), "help");
         assert_eq!(service.menu.action_for(5).unwrap().as_str(), "quit");
+
+        assert!(service.menu.action_for(1).is_none());
+        assert!(service.menu.action_for(2).is_none());
+    }
+
+    #[test]
+    fn layout_update_offsets_menu_ids_across_empty_state() {
+        let (sink, _events) = channel();
+        let initial = TrayState::new().with_menu(Menu::new([
+            MenuNode::item("open", "Open"),
+            MenuNode::item("quit", "Quit"),
+        ]));
+        let mut service = Service::new("tray".into(), TrayId::new("test"), initial, Arc::new(sink));
+
+        assert_eq!(service.menu.max_id(), 2);
+
+        // Transition to empty menu
+        let changes = service.set_state(TrayState::new().with_menu(Menu::new([])));
+
+        assert!(matches!(changes.menu, MenuChange::LayoutUpdated));
+        assert_eq!(service.menu_id_base, 2);
+        assert_eq!(service.menu.max_id(), 0);
+
+        // Transition back to non-empty
+        let changes = service.set_state(TrayState::new().with_menu(Menu::new([
+            MenuNode::item("open", "Open"),
+            MenuNode::item("quit", "Quit"),
+        ])));
+
+        assert!(matches!(changes.menu, MenuChange::LayoutUpdated));
+        assert_eq!(service.menu_id_base, 2);
+        assert_eq!(service.menu.max_id(), 4);
+        assert_eq!(service.menu.action_for(3).unwrap().as_str(), "open");
+        assert_eq!(service.menu.action_for(4).unwrap().as_str(), "quit");
 
         assert!(service.menu.action_for(1).is_none());
         assert!(service.menu.action_for(2).is_none());
