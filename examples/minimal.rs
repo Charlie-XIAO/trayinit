@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 fn tray_state() -> Result<TrayState> {
     Ok(TrayState::new()
         .with_title("trayinit")
-        .with_icon(common::checker_icon()?)
+        .with_icon(common::icon()?)
         .with_tooltip("trayinit")
         .with_menu(Menu::new([
             MenuNode::item(OPEN_ID, "Open"),

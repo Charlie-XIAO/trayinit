@@ -10,10 +10,6 @@ linux-zbus-tokio = ["dep:tokio", "zbus/tokio"]
 
 [dependencies]
 
-[dev-dependencies]
-winit = "0.30.13"
-anyhow = "1"
-
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
@@ -73,3 +69,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "NSThread",
 ] }
 png = "0.18"
+
+[dev-dependencies]
+winit = "0.30.13"
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }

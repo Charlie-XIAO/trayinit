@@ -143,7 +143,7 @@ fn main() -> Result<()> {
 fn tray_state(sync_enabled: bool) -> Result<trayinit::TrayState> {
     Ok(trayinit::TrayState::new()
         .with_title("trayinit")
-        .with_icon(common::checker_icon()?)
+        .with_icon(common::icon()?)
         .with_tooltip("trayinit")
         .with_menu(trayinit::Menu::new([
             trayinit::MenuNode::item(OPEN_ID, "Open"),
